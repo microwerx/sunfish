@@ -1,0 +1,3 @@
+[submodule "fluxions-gte"]
+	path = fluxions-gte
+	url = https://github.com/microwerx/fluxions-gte
