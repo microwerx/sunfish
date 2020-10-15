@@ -1,5 +1,6 @@
-// pbmcpt.cpp : Defines the entry point for the console application.
-//
+// SUNFISH Path Tracer
+// (C) 2015-2020 Jonathan Metzgar
+// Sunfish is a Monte Carlo path tracer for physically based rendering in as simple a way possible
 
 #include <vector>
 #include <string>
@@ -7,11 +8,11 @@
 #include <thread>
 #include <future>
 #include <mutex>
-#include <fluxions.hpp>
-#include <fluxions_image.hpp>
-#include <viperfish_utilities.hpp>
+#include <fluxions_gte.hpp>
+#include <fluxions_gte_image.hpp>
+//#include <viperfish_utilities.hpp>
 
-#pragma comment(lib, "libfluxions.lib")
+#pragma comment(lib, "fluxions.lib")
 
 using namespace std;
 using namespace Fluxions;
