@@ -4,3 +4,6 @@
 [submodule "hatchetfish"]
 	path = hatchetfish
 	url = https://github.com/microwerx/hatchetfish
+[submodule "fluxions"]
+	path = fluxions
+	url = https://github.com/microwerx/fluxions
