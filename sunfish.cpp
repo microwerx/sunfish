@@ -8,8 +8,10 @@
 #include <thread>
 #include <future>
 #include <mutex>
+#include <iostream>
 #include <fluxions_gte.hpp>
 #include <fluxions_gte_image.hpp>
+#include <hatchetfish.hpp>
 //#include <viperfish_utilities.hpp>
 
 #pragma comment(lib, "fluxions.lib")
@@ -250,8 +252,8 @@ void Camera::computeParameters() {
 	float halfHeight = tan(theta / 2.0f);
 	float halfWidth = aspectRatio * halfHeight;
 	origin = eye;
-	w = (eye - center).unit_vector();
-	u = cross(up, w).unit_vector();
+	w = (eye - center).unit();
+	u = cross(up, w).unit();
 	v = cross(w, u);
 	horizontal = 2.0f * distance_to_focus * halfWidth * u;
 	vertical = 2.0f * distance_to_focus * halfHeight * v;
@@ -445,7 +447,7 @@ bool Material::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenu
 
 Vector3f Material::shadeShirleySky(const Rayf& r, const SimpleEnvironment& environment) {
 	// no hits, so return background color
-	Vector3f unit_direction = r.direction.norm();
+	Vector3f unit_direction = r.direction.unit();
 	float t = 0.5f * unit_direction.y + 1.0f;
 	return (1.0f - t) * Vector3f(1.0f, 1.0f, 1.0f) + t * Vector3f(0.5f, 0.7f, 1.0f);
 }
@@ -479,7 +481,7 @@ Vector3f reflect(const Vector3f& v, const Vector3f& n) {
 }
 
 bool refract(const Vector3f& v, const Vector3f& n, float ni_over_nt, Vector3f& refracted) {
-	Vector3f uv = v.norm();
+	Vector3f uv = v.unit();
 	float dt = DotProduct(uv, n);
 	float discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dt * dt);
 	if (discriminant > 0.0f) {
@@ -505,7 +507,7 @@ public:
 };
 
 bool MetalMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const {
-	Vector3f reflected = reflect(rayIn.direction.norm(), rec.normal);
+	Vector3f reflected = reflect(rayIn.direction.unit(), rec.normal);
 	scatteredRay = Rayf(rec.p, reflected + fuzz * getRandomUnitSphereVector());
 	attenuation = albedo;
 	return (DotProduct(scatteredRay.direction, rec.normal) > 0);
@@ -669,7 +671,7 @@ Vector3f Scene::Trace(const Rayf& r, int depth) {
 		Rayf scatteredRay;
 		Vector3f attenuation;
 		if (depth < 50 && rec.pmaterial->scatter(r, rec, attenuation, scatteredRay)) {
-			return attenuation.multiply(Trace(scatteredRay, depth + 1));
+			return attenuation * Trace(scatteredRay, depth + 1);
 		}
 		else {
 			return Vector3f(0.0f, 0.0f, 0.0f);
@@ -969,9 +971,9 @@ struct WorkerContext {
 	int bottom;
 	int right;
 	int top;
-	Scene* scene;
-	Image<Color4f>* framebuffer;
-	SceneConfiguration* sceneConfig;
+	Scene* scene{ nullptr };
+	Image4f* framebuffer{ nullptr };
+	SceneConfiguration* sceneConfig{ nullptr };
 };
 
 int PathTraceWorker(WorkerContext* wc);
@@ -984,7 +986,7 @@ int PathTraceWorker(WorkerContext* wc) {
 		return -1;
 	}
 
-	Image<Color4f> tmpImage(wc->right - wc->left, wc->bottom - wc->top);
+	Image4f tmpImage(wc->right - wc->left, wc->bottom - wc->top);
 
 	for (int i = wc->left; i <= wc->right; i++) {
 		for (int j = wc->top; j <= wc->bottom; j++) {
@@ -1006,7 +1008,7 @@ int PathTraceWorker(WorkerContext* wc) {
 
 			// gamma correct image
 
-			Color4f gammaCorrectedColor = Color4f(sqrt(output.r), sqrt(output.g), sqrt(output.b), 1.0f);
+			Color4f gammaCorrectedColor{ sqrt(output.x), sqrt(output.y), sqrt(output.z), 1.0f };
 
 			// Framebuffer is write only, so mutex not really needed
 			// But if reading and writing was conditional, then mutex would be needed.
@@ -1055,7 +1057,7 @@ int main(int argc, const char** argv) {
 
 	auto start = std::chrono::steady_clock::now();
 
-	Viperfish::StopWatch stopwatch;
+	Hf::StopWatch stopwatch;
 	pathTracerScene.ssg.environment.pbsky.SetGroundAlbedo(0.1f, 0.1f, 0.1f);
 	pathTracerScene.ssg.environment.pbsky.SetLocalDate(1, 5, 2016, true, -4);
 	pathTracerScene.ssg.environment.pbsky.SetLocalTime(10, 0, 0, 0.0f);
@@ -1088,7 +1090,7 @@ int main(int argc, const char** argv) {
 	if (0)
 		for (int curObj = 0; curObj < 100; curObj++) {
 			Vector3f disc = getRandomUnitDiscVector();
-			Vector3f color = 0.5 * (1 + getRandomUnitSphereVector().norm());
+			Vector3f color = 0.5 * (1 + getRandomUnitSphereVector().unit());
 
 			//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, 0.025f, 4.0f * disc.y), 0.025f, new LambertianMaterial(color)));
 			pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, rand() / (float)RAND_MAX, 4.0f * disc.y), 0.1f * rand() / (float)RAND_MAX, new MetalMaterial(color, rand() / (float)RAND_MAX)));
@@ -1100,7 +1102,7 @@ int main(int argc, const char** argv) {
 	//pathTracer.AddInstance("largeSphere01", "largeSphere");
 	//pathTracer.AddMaterial("normalShader", new NormalShadeMaterial);
 
-	Fluxions::Image<Color4f> framebuffer(nx, ny, 1);
+	Image4f framebuffer(nx, ny, 1);
 
 	start = std::chrono::steady_clock::now();
 
