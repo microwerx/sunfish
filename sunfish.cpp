@@ -8,10 +8,12 @@
 #include <thread>
 #include <future>
 #include <mutex>
-#include <iostream>
+#include <fluxions_stdcxx.hpp>
 #include <fluxions_gte.hpp>
 #include <fluxions_gte_image.hpp>
 #include <hatchetfish.hpp>
+#include <fluxions_ssg_environment.hpp>
+#include <fluxions_ssg.hpp>
 //#include <viperfish_utilities.hpp>
 
 #pragma comment(lib, "fluxions.lib")
@@ -116,7 +118,7 @@ RandomLUT RTrandom;
 Vector3f getRandomUnitSphereVector() {
 	Vector3f p;
 	do {
-		p = 2.0f * Vector3f(RTrandom.frand(), RTrandom.frand(), RTrandom.frand()) - Vector3f(1.0f, 1.0f, 1.0f);
+		p = 2.0f * Vector3f(RTrandom.frand(), RTrandom.frand(), RTrandom.frand()) - Vector3f(1.0f);
 	} while (DotProduct(p, p) >= 1.0f);
 	return p;
 }
@@ -255,8 +257,8 @@ void Camera::computeParameters() {
 	w = (eye - center).unit();
 	u = cross(up, w).unit();
 	v = cross(w, u);
-	horizontal = 2.0f * distance_to_focus * halfWidth * u;
-	vertical = 2.0f * distance_to_focus * halfHeight * v;
+	horizontal = Vector3f(2.0f * distance_to_focus * halfWidth) * u;
+	vertical = Vector3f(2.0f * distance_to_focus * halfHeight) * v;
 	lowerLeftCorner = origin - (distance_to_focus * halfWidth) * u - (distance_to_focus * halfHeight) * v - distance_to_focus * w;
 }
 
@@ -453,7 +455,7 @@ Vector3f Material::shadeShirleySky(const Rayf& r, const SimpleEnvironment& envir
 }
 
 Vector3f Material::shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment) {
-	Color4f color = environment.pbsky.generatedCubeMap.getPixelCubeMap(r.direction.x, max(0.0f, r.direction.y), r.direction.z);
+	Color4f color = environment.pbsky.generatedSunCubeMap.getPixelCubeMap(r.direction.x, max(0.0f, r.direction.y), r.direction.z);
 	return Vector3f(color.r, color.g, color.b);
 	//// no hits, so return background color
 	//Vector3f unit_direction = r.direction.norm();
@@ -566,7 +568,7 @@ public:
 	NormalShadeMaterial() {}
 
 	virtual Vector3f shadeClosestHit(const Rayf& r, const HitRecord& rec) {
-		return 0.5f * (1 + rec.normal);
+		return 0.5f * (1.0f + rec.normal);
 	}
 };
 
@@ -1064,7 +1066,7 @@ int main(int argc, const char** argv) {
 	pathTracerScene.ssg.environment.pbsky.SetLocation(27.907360f, -82.324440f);
 	pathTracerScene.ssg.environment.pbsky.SetTurbidity(sceneConfiguration.sun_turbidity);
 	pathTracerScene.ssg.environment.pbsky.SetNumSamples(1);
-	pathTracerScene.ssg.environment.pbsky.ComputeSunFromLocale();
+	pathTracerScene.ssg.environment.pbsky.computeAstroFromLocale();
 	pathTracerScene.ssg.environment.pbsky.ComputeCubeMap(256, false, 8.0f, true);
 	pathTracerScene.ssg.environment.pbsky.ComputeCylinderMap(512, 128);
 	stopwatch.Stop();
@@ -1073,13 +1075,13 @@ int main(int argc, const char** argv) {
 	//std::cerr << "Hosek Wilkie: " << std::chrono::duration <double, std::milli>(diff).count() << " ms" << std::endl;
 	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
 
-	pathTracerScene.ssg.environment.pbsky.generatedCubeMap.savePPMRaw("pbsky_cubemap_0.ppm", 0);
-	pathTracerScene.ssg.environment.pbsky.generatedCubeMap.savePPMRaw("pbsky_cubemap_1.ppm", 1);
-	pathTracerScene.ssg.environment.pbsky.generatedCubeMap.savePPMRaw("pbsky_cubemap_2.ppm", 2);
-	pathTracerScene.ssg.environment.pbsky.generatedCubeMap.savePPMRaw("pbsky_cubemap_3.ppm", 3);
-	pathTracerScene.ssg.environment.pbsky.generatedCubeMap.savePPMRaw("pbsky_cubemap_4.ppm", 4);
-	pathTracerScene.ssg.environment.pbsky.generatedCubeMap.savePPMRaw("pbsky_cubemap_5.ppm", 5);
-	pathTracerScene.ssg.environment.pbsky.generatedCylMap.savePPMRaw("pbsky_cylmap.ppm");
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_0.ppm", 0);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_1.ppm", 1);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_2.ppm", 2);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_3.ppm", 3);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_4.ppm", 4);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_5.ppm", 5);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCylMap.savePPM("pbsky_cylmap.ppm");
 
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Vector3f(0.8f, 0.1f, 0.1f), 0.05f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Vector3f(0.1f, 0.2f, 0.5f))));
@@ -1090,7 +1092,7 @@ int main(int argc, const char** argv) {
 	if (0)
 		for (int curObj = 0; curObj < 100; curObj++) {
 			Vector3f disc = getRandomUnitDiscVector();
-			Vector3f color = 0.5 * (1 + getRandomUnitSphereVector().unit());
+			Vector3f color = 0.5f * (1.0f + getRandomUnitSphereVector().unit());
 
 			//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, 0.025f, 4.0f * disc.y), 0.025f, new LambertianMaterial(color)));
 			pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, rand() / (float)RAND_MAX, 4.0f * disc.y), 0.1f * rand() / (float)RAND_MAX, new MetalMaterial(color, rand() / (float)RAND_MAX)));
@@ -1223,17 +1225,20 @@ int main(int argc, const char** argv) {
 
 	cout << "P3\n" << sceneConfiguration.imageWidth << " " << sceneConfiguration.imageHeight << "\n" << maxColor << "\n";
 
-	for (int j = sceneConfiguration.imageHeight - 1; j >= 0; j--) {
-		for (int i = 0; i < sceneConfiguration.imageWidth; i++) {
-			Color4f finalColor = framebuffer.getPixel(i, j);
-			int ir = int(255.99f * finalColor.r);
-			int ig = int(255.99f * finalColor.g);
-			int ib = int(255.99f * finalColor.b);
+	//for (int j = sceneConfiguration.imageHeight - 1; j >= 0; j--) {
+	//	for (int i = 0; i < sceneConfiguration.imageWidth; i++) {
+	//		Color4f finalColor = framebuffer.getPixel(i, j);
+	//		int ir = int(255.99f * finalColor.r);
+	//		int ig = int(255.99f * finalColor.g);
+	//		int ib = int(255.99f * finalColor.b);
 
-			cout << ir << " " << ig << " " << ib << "\n";
-		}
-		cout << flush;
-	}
+	//		cout << ir << " " << ig << " " << ib << "\n";
+	//	}
+	//	cout << flush;
+	//}
+
+	framebuffer.flipY();
+	framebuffer.saveEXR("output.exr");
 
 	return 0;
 }

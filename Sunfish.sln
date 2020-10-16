@@ -7,11 +7,18 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sunfish", "Sunfish.vcxproj"
 	ProjectSection(ProjectDependencies) = postProject
 		{0C42445E-96F1-4ED0-B14A-121460A0789A} = {0C42445E-96F1-4ED0-B14A-121460A0789A}
 		{E385FD9F-1950-481E-B757-F4908D7141CA} = {E385FD9F-1950-481E-B757-F4908D7141CA}
+		{CC5438F5-5E12-4F28-8B2F-13359021B095} = {CC5438F5-5E12-4F28-8B2F-13359021B095}
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fluxions-gte", "fluxions-gte\fluxions-gte.vcxproj", "{0C42445E-96F1-4ED0-B14A-121460A0789A}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "hatchetfish", "hatchetfish\hatchetfish.vcxproj", "{E385FD9F-1950-481E-B757-F4908D7141CA}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fluxions", "fluxions\fluxions.vcxproj", "{CC5438F5-5E12-4F28-8B2F-13359021B095}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0C42445E-96F1-4ED0-B14A-121460A0789A} = {0C42445E-96F1-4ED0-B14A-121460A0789A}
+		{E385FD9F-1950-481E-B757-F4908D7141CA} = {E385FD9F-1950-481E-B757-F4908D7141CA}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -31,6 +38,10 @@ Global
 		{E385FD9F-1950-481E-B757-F4908D7141CA}.Debug|x64.Build.0 = Debug|x64
 		{E385FD9F-1950-481E-B757-F4908D7141CA}.Release|x64.ActiveCfg = Release|x64
 		{E385FD9F-1950-481E-B757-F4908D7141CA}.Release|x64.Build.0 = Release|x64
+		{CC5438F5-5E12-4F28-8B2F-13359021B095}.Debug|x64.ActiveCfg = Debug|x64
+		{CC5438F5-5E12-4F28-8B2F-13359021B095}.Debug|x64.Build.0 = Debug|x64
+		{CC5438F5-5E12-4F28-8B2F-13359021B095}.Release|x64.ActiveCfg = Release|x64
+		{CC5438F5-5E12-4F28-8B2F-13359021B095}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
