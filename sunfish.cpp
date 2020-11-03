@@ -68,8 +68,8 @@ public:
 	RandomLUT();
 	RandomLUT(int size);
 
-	void Init(int size);
-	void Seed(int seed);
+	void init(int size);
+	void seed(int seed);
 
 	float frand();
 	double drand();
@@ -92,16 +92,16 @@ private:
 
 
 RandomLUT::RandomLUT() {
-	Init(32768);
+	init(32768);
 }
 
 
 RandomLUT::RandomLUT(int size) {
-	Init(size);
+	init(size);
 }
 
 
-void RandomLUT::Init(int size) {
+void RandomLUT::init(int size) {
 	this->size = size;
 	frandom.resize(size);
 	drandom.resize(size);
@@ -158,7 +158,7 @@ int RandomLUT::_irand(int t0, int t1) {
 }
 
 
-void RandomLUT::Seed(int seed) {
+void RandomLUT::seed(int seed) {
 	curIndex = seed % frandom.size();
 }
 
@@ -175,7 +175,7 @@ Vector3f getRandomUnitSphereVector() {
 	Vector3f p;
 	do {
 		p = 2.0f * Vector3f(RTrandom.frand(), RTrandom.frand(), RTrandom.frand()) - Vector3f(1.0f);
-	} while (DotProduct(p, p) >= 1.0f);
+	} while (dot(p, p) >= 1.0f);
 	return p;
 }
 
@@ -195,13 +195,13 @@ Vector3f getRandomUnitDiscVector() {
 
 
 Vector3f reflect(const Vector3f& v, const Vector3f& n) {
-	return v - 2.0f * DotProduct(v, n) * n;
+	return v - 2.0f * dot(v, n) * n;
 }
 
 
 bool refract(const Vector3f& v, const Vector3f& n, float ni_over_nt, Vector3f& refracted) {
 	Vector3f uv = v.unit();
-	float dt = DotProduct(uv, n);
+	float dt = dot(uv, n);
 	float discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dt * dt);
 	if (discriminant > 0.0f) {
 		refracted = ni_over_nt * (v - n * dt) - n * sqrt(discriminant);
@@ -234,10 +234,10 @@ public:
 	Camera();
 	Camera(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture = 2.0f, float distance_to_focus = 0.0f);
 
-	void Init(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture = 2.0f, float distance_to_focus = 0.0f);
-	void SetLense(float aperture, float distance_to_focus);
-	void SetProjection(float fovyInDegrees, float aspectRatio, float znear, float zfar);
-	void SetLookAt(Vector3f eye, Vector3f center, Vector3f up);
+	void init(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture = 2.0f, float distance_to_focus = 0.0f);
+	void setLense(float aperture, float distance_to_focus);
+	void setProjection(float fovyInDegrees, float aspectRatio, float znear, float zfar);
+	void setLookAt(Vector3f eye, Vector3f center, Vector3f up);
 
 	Rayf getRay(float u, float v);
 	Rayf getRayDOF(float u, float v);
@@ -273,12 +273,12 @@ public:
 	Vector3f v;
 	Vector3f w;
 private:
-	void computeParameters();
+	void computeParameters_();
 };
 
 
 Camera::Camera() {
-	Init(Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f), 90.0f, 2.0f, 0.001f, 100.0f);
+	init(Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f), 90.0f, 2.0f, 0.001f, 100.0f);
 	lensRadius = 1.0f;
 	//lowerLeftCorner=Vector3f(-2.0, -1.0, -1.0);
 	//horizontal=Vector3f(4.0, 0.0, 0.0);
@@ -288,19 +288,19 @@ Camera::Camera() {
 
 
 Camera::Camera(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture, float distance_to_focus) {
-	Init(origin, center, up, yfovInDegrees, aspectRatio, znear, zfar);
-	SetLense(aperture, (center - eye).length());
+	init(origin, center, up, yfovInDegrees, aspectRatio, znear, zfar);
+	setLense(aperture, (center - eye).length());
 }
 
 
-void Camera::Init(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture, float distance_to_focus) {
-	SetProjection(yfovInDegrees, aspectRatio, znear, zfar);
-	SetLookAt(eye, center, up);
-	SetLense(aperture, distance_to_focus);
+void Camera::init(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture, float distance_to_focus) {
+	setProjection(yfovInDegrees, aspectRatio, znear, zfar);
+	setLookAt(eye, center, up);
+	setLense(aperture, distance_to_focus);
 }
 
 
-void Camera::SetLense(float aperture, float distance_to_focus) {
+void Camera::setLense(float aperture, float distance_to_focus) {
 	this->aperture = aperture;
 	if (distance_to_focus <= 0.0f)
 		this->distance_to_focus = (eye - center).length();
@@ -309,7 +309,7 @@ void Camera::SetLense(float aperture, float distance_to_focus) {
 }
 
 
-void Camera::SetProjection(float fovyInDegrees, float aspectRatio, float znear, float zfar) {
+void Camera::setProjection(float fovyInDegrees, float aspectRatio, float znear, float zfar) {
 	this->fovy = fovyInDegrees;
 	this->aspectRatio = aspectRatio;
 	this->znear = znear;
@@ -323,11 +323,11 @@ void Camera::SetProjection(float fovyInDegrees, float aspectRatio, float znear, 
 	ProjectionViewMatrix = ProjectionMatrix * ViewMatrix;
 	InverseProjectionViewMatrix = ProjectionViewMatrix.AsInverse();
 
-	computeParameters();
+	computeParameters_();
 }
 
 
-void Camera::SetLookAt(Vector3f eye, Vector3f center, Vector3f up) {
+void Camera::setLookAt(Vector3f eye, Vector3f center, Vector3f up) {
 	this->eye = eye;
 	this->center = center;
 	this->up = up;
@@ -339,7 +339,7 @@ void Camera::SetLookAt(Vector3f eye, Vector3f center, Vector3f up) {
 	ProjectionViewMatrix = ProjectionMatrix * ViewMatrix;
 	InverseProjectionViewMatrix = ProjectionViewMatrix.AsInverse();
 
-	computeParameters();
+	computeParameters_();
 }
 
 
@@ -355,7 +355,7 @@ Rayf Camera::getRayDOF(float s, float t) {
 }
 
 
-void Camera::computeParameters() {
+void Camera::computeParameters_() {
 	float theta = float(fovy * FX_DEGREES_TO_RADIANS);
 	float halfHeight = tan(theta / 2.0f);
 	float halfWidth = aspectRatio * halfHeight;
@@ -380,11 +380,11 @@ void Camera::computeParameters() {
 class Material;
 
 struct HitRecord {
-	float t;
+	float t{ 0.0f };
 	Vector3f p;
 	Vector3f normal;
 
-	Material* pmaterial = nullptr;
+	Material* pmaterial{ nullptr };
 };
 
 
@@ -393,8 +393,8 @@ struct HitRecord {
 //////////////////////////////////////////////////////////////////////
 // A RayTraceObject is used as a base class for an object that can
 // be intersected by a ray. It supports the virtual methods:
-// - closest_hit
-// - any_hit
+// - closestHit
+// - anyHit
 //////////////////////////////////////////////////////////////////////
 
 
@@ -403,12 +403,12 @@ public:
 	RayTraceObject() {}
 	RayTraceObject(const string& name) : name(name) {}
 
-	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		rec.pmaterial = material;
 		return false;
 	}
 
-	virtual bool any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+	virtual bool anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		return false;
 	}
 
@@ -420,7 +420,7 @@ public:
 //////////////////////////////////////////////////////////////////////
 // InstancedRTO //////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
-// An InstancedRTO implements the closest_hit and any_hit methods from
+// An InstancedRTO implements the closestHit and anyHit methods from
 // a RayTraceObject. It is initialized with a pointer to a different
 // object.
 //
@@ -435,13 +435,13 @@ public:
 	InstancedRTO(const string& name, RayTraceObject* rto)
 		: RayTraceObject(name), pRTO(rto) {}
 
-	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
-		if (pRTO) pRTO->closest_hit(r, tMin, tMax, rec);
+	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+		if (pRTO) pRTO->closestHit(r, tMin, tMax, rec);
 		return false;
 	}
 
-	virtual bool any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
-		if (pRTO) pRTO->any_hit(r, tMin, tMax, rec);
+	virtual bool anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+		if (pRTO) pRTO->anyHit(r, tMin, tMax, rec);
 		return false;
 	}
 
@@ -468,21 +468,21 @@ public:
 		RTOs.clear();
 	}
 
-	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
-	virtual bool any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
+	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
+	virtual bool anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
 
 	vector<RayTraceObject*> RTOs;
 };
 
 
-bool RtoList::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+bool RtoList::closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 	HitRecord tempRec;
 
 	bool hitAnything = false;
 	float closestHitT = tMax;
 
 	for (auto rto = RTOs.begin(); rto != RTOs.end(); rto++) {
-		if ((*rto)->closest_hit(r, tMin, closestHitT, tempRec)) {
+		if ((*rto)->closestHit(r, tMin, closestHitT, tempRec)) {
 			hitAnything = true;
 			closestHitT = tempRec.t;
 			rec = tempRec;
@@ -493,11 +493,11 @@ bool RtoList::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec)
 }
 
 
-bool RtoList::any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+bool RtoList::anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 	HitRecord tempRec;
 
 	for (auto rto = RTOs.begin(); rto != RTOs.end(); rto++) {
-		if ((*rto)->any_hit(r, tMin, tMax, tempRec)) {
+		if ((*rto)->anyHit(r, tMin, tMax, tempRec)) {
 			return true;
 		}
 	}
@@ -512,7 +512,7 @@ bool RtoList::any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) con
 // An RtoSphere is a ray trace object representing a sphere.
 //
 // TODO:
-// [ ] implement any_hit
+// [ ] implement anyHit
 //////////////////////////////////////////////////////////////////////
 
 
@@ -524,19 +524,19 @@ public:
 		material = pmat;
 	}
 
-	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
-	//virtual bool any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
+	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
+	//virtual bool anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
 
 	Vector3f center;
 	float radius{ 1.0f };
 };
 
 
-bool RtoSphere::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+bool RtoSphere::closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 	Vector3f oc = r.origin - center;
-	float a = DotProduct(r.direction, r.direction);
-	float b = DotProduct(oc, r.direction);
-	float c = DotProduct(oc, oc) - radius * radius;
+	float a = dot(r.direction, r.direction);
+	float b = dot(oc, r.direction);
+	float c = dot(oc, oc) - radius * radius;
 	float discriminant = b * b - a * c;
 	float temp;
 	if (discriminant > 0) {
@@ -564,9 +564,9 @@ bool RtoSphere::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& re
 //float hit_sphere(const Vector3f &center, float radius, const Rayf &r)
 //{
 //	Vector3f oc = r.origin - center;
-//	float a = DotProduct(r.direction, r.direction);
-//	float b = 2.0f*DotProduct(oc, r.direction);
-//	float c = DotProduct(oc, oc) - radius*radius;
+//	float a = dot(r.direction, r.direction);
+//	float b = 2.0f*dot(oc, r.direction);
+//	float c = dot(oc, oc) - radius*radius;
 //	float discriminant = b*b - 4 * a*c;
 //	if (discriminant < 0)
 //	{
@@ -700,7 +700,7 @@ bool MetalMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& a
 	Vector3f reflected = reflect(rayIn.direction.unit(), rec.normal);
 	scatteredRay = Rayf(rec.p, reflected + fuzz * getRandomUnitSphereVector());
 	attenuation = albedo;
-	return (DotProduct(scatteredRay.direction, rec.normal) > 0);
+	return (dot(scatteredRay.direction, rec.normal) > 0);
 }
 
 
@@ -732,15 +732,15 @@ bool DielectricMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector
 	float cosine;
 
 	// inside or outside?
-	if (DotProduct(rayIn.direction, rec.normal) > 0) {
+	if (dot(rayIn.direction, rec.normal) > 0) {
 		outwardNormal = Vector3f(-rec.normal.x, -rec.normal.y, -rec.normal.z);
 		ni_over_nt = F_0;
-		cosine = F_0 * DotProduct(rayIn.direction, rec.normal) / rayIn.direction.length();
+		cosine = F_0 * dot(rayIn.direction, rec.normal) / rayIn.direction.length();
 	}
 	else {
 		outwardNormal = rec.normal;
 		ni_over_nt = 1.0f / F_0;
-		cosine = -DotProduct(rayIn.direction, rec.normal) / rayIn.direction.length();
+		cosine = -dot(rayIn.direction, rec.normal) / rayIn.direction.length();
 	}
 
 	if (refract(rayIn.direction, outwardNormal, ni_over_nt, refracted)) {
@@ -785,7 +785,7 @@ public:
 //	static NormalShadeMaterial defaultMaterial;
 //	HitRecord rec;
 //
-//	if (world.closest_hit(r, 0.001f, FLT_MAX, rec))
+//	if (world.closestHit(r, 0.001f, FLT_MAX, rec))
 //	{
 //		Rayf scatteredRay;
 //		Vector3f attenuation;
@@ -837,11 +837,11 @@ public:
 	Scene();
 	~Scene();
 
-	void AddRTO(const string& name, RayTraceObject* rto);
-	void AddMaterial(const string& name, Material* material);
-	void AddInstance(const string& instanceName, const string& geometryName);
-	Vector3f Trace(const Rayf& r, int depth);
-	void Render();
+	void addRTO(const string& name, RayTraceObject* rto);
+	void addMaterial(const string& name, Material* material);
+	void addInstance(const string& instanceName, const string& geometryName);
+	Vector3f trace(const Rayf& r, int depth);
+	void render();
 
 	SimpleSceneGraph ssg;
 	//SimpleEnvironment environment;
@@ -860,7 +860,7 @@ Scene::Scene() {}
 Scene::~Scene() {}
 
 
-void Scene::AddRTO(const string& name, RayTraceObject* rto) {
+void Scene::addRTO(const string& name, RayTraceObject* rto) {
 	if (geometry[name] != nullptr) {
 		delete geometry[name];
 		geometry[name] = nullptr;
@@ -870,25 +870,25 @@ void Scene::AddRTO(const string& name, RayTraceObject* rto) {
 }
 
 
-void Scene::AddMaterial(const string& name, Material* material) {
+void Scene::addMaterial(const string& name, Material* material) {
 	materials[name] = material;
 }
 
 
-void Scene::AddInstance(const string& instanceName, const string& geometryName) {
+void Scene::addInstance(const string& instanceName, const string& geometryName) {
 	world.RTOs.push_back(new InstancedRTO(instanceName, geometry[geometryName]));
 }
 
 
-Vector3f Scene::Trace(const Rayf& r, int depth) {
+Vector3f Scene::trace(const Rayf& r, int depth) {
 	static NormalShadeMaterial defaultMaterial;
 	HitRecord rec;
 
-	if (world.closest_hit(r, 0.001f, FLT_MAX, rec)) {
+	if (world.closestHit(r, 0.001f, FLT_MAX, rec)) {
 		Rayf scatteredRay;
 		Vector3f attenuation;
 		if (depth < 50 && rec.pmaterial->scatter(r, rec, attenuation, scatteredRay)) {
-			return attenuation * Trace(scatteredRay, depth + 1);
+			return attenuation * trace(scatteredRay, depth + 1);
 		}
 		else {
 			return Vector3f(0.0f, 0.0f, 0.0f);
@@ -900,7 +900,7 @@ Vector3f Scene::Trace(const Rayf& r, int depth) {
 }
 
 
-void Scene::Render() {
+void Scene::render() {
 
 }
 
@@ -942,13 +942,13 @@ public:
 	float sun_albedo[3];
 
 private:
-	bool GetParameterf(int argc, const char** argv, int* i, const string& parameter, float* value);
-	int GetParameteri(int argc, const char** argv, int* i, const string& parameter);
-	string GetParameters(int argc, const char** argv, int* i, const string& parameter);
+	bool getParameterf(int argc, const char** argv, int* i, const string& parameter, float* value);
+	int getParameteri(int argc, const char** argv, int* i, const string& parameter);
+	string getParameters(int argc, const char** argv, int* i, const string& parameter);
 };
 
 
-bool SceneConfiguration::GetParameterf(int argc, const char** argv, int* i, const string& parameter, float* value) {
+bool SceneConfiguration::getParameterf(int argc, const char** argv, int* i, const string& parameter, float* value) {
 	if (*i < 0 || *i >= argc) return false;
 
 	if (parameter == argv[*i]) {
@@ -963,7 +963,7 @@ bool SceneConfiguration::GetParameterf(int argc, const char** argv, int* i, cons
 }
 
 
-int SceneConfiguration::GetParameteri(int argc, const char** argv, int* i, const string& parameter) {
+int SceneConfiguration::getParameteri(int argc, const char** argv, int* i, const string& parameter) {
 	if (*i < 0 || *i >= argc) return 0;
 
 	int value{ 0 };
@@ -979,7 +979,7 @@ int SceneConfiguration::GetParameteri(int argc, const char** argv, int* i, const
 }
 
 
-string SceneConfiguration::GetParameters(int argc, const char** argv, int* i, const string& parameter) {
+string SceneConfiguration::getParameters(int argc, const char** argv, int* i, const string& parameter) {
 	if (*i < 0 || *i >= argc) return string();
 
 	string value{ "" };
@@ -1143,7 +1143,7 @@ SceneConfiguration::SceneConfiguration(int argc, const char** argv) {
 			}
 		}
 
-		if (GetParameterf(argc, argv, &i, "-turbidity", &sun_turbidity)) {
+		if (getParameterf(argc, argv, &i, "-turbidity", &sun_turbidity)) {
 		}
 	}
 
@@ -1202,23 +1202,23 @@ void SceneConfiguration::printHelp() {
 
 
 struct WorkerContext {
-	int left;
-	int bottom;
-	int right;
-	int top;
+	int left{ 0 };
+	int bottom{ 0 };
+	int right{ 0 };
+	int top{ 0 };
 	Scene* scene{ nullptr };
 	Image4f* framebuffer{ nullptr };
 	SceneConfiguration* sceneConfig{ nullptr };
 };
 
 
-int PathTraceWorker(WorkerContext* wc);
+int pathTraceWorker(WorkerContext* wc);
 
 
 mutex framebuffer_mutex;
 
 
-int PathTraceWorker(WorkerContext* wc) {
+int pathTraceWorker(WorkerContext* wc) {
 	if (wc == nullptr || wc->scene == nullptr || wc->sceneConfig == nullptr || wc->framebuffer == nullptr) {
 		cerr << "blah!";
 		return -1;
@@ -1235,7 +1235,7 @@ int PathTraceWorker(WorkerContext* wc) {
 
 				Rayf r = wc->scene->camera.getRayDOF(u, v);
 				Vector3f p = r.getPointAtParameter(2.0f);
-				output += wc->scene->Trace(r, 0);
+				output += wc->scene->trace(r, 0);
 				//output += Trace(r, wc->scene->world, 0, wc->scene->environment);
 			}
 
@@ -1319,8 +1319,8 @@ void Sunfish::makeDefaultScene_() {
 	world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
 
 	pathTracerScene.camera.lensRadius = 0.0f;// 0.1f;
-	pathTracerScene.camera.SetProjection(45.0f, sceneConfig.imageAspect, 0.001f, 100.0f);
-	pathTracerScene.camera.SetLookAt(Vector3f(0.0f, 0.0f, 1.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f));
+	pathTracerScene.camera.setProjection(45.0f, sceneConfig.imageAspect, 0.001f, 100.0f);
+	pathTracerScene.camera.setLookAt(Vector3f(0.0f, 0.0f, 1.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f));
 
 	auto start = std::chrono::steady_clock::now();
 
@@ -1405,7 +1405,7 @@ void Sunfish::renderStart() {
 		wc.scene = &pathTracerScene;
 		wc.sceneConfig = &sceneConfig;
 
-		PathTraceWorker(&wc);
+		pathTraceWorker(&wc);
 	}
 	else {
 		vector<WorkerContext> wcs;
@@ -1429,7 +1429,7 @@ void Sunfish::renderStart() {
 
 		for (auto wc = wcs.begin(); wc != wcs.end(); wc++) {
 			WorkerContext* pwc = &(*wc);
-			futures.push_back(async(PathTraceWorker, pwc));
+			futures.push_back(async(pathTraceWorker, pwc));
 		}
 
 		int i = 0;
@@ -1509,11 +1509,11 @@ void Sunfish::renderStop() {
 			if (ig > maxColor) maxColor = ig;
 			if (ib > maxColor) maxColor = ib;
 
-			total += ir + ig + ib;
+			total += (long long)ir + ig + ib;
 		}
 	}
 
-	total /= 3 * sceneConfig.imageWidth * sceneConfig.imageHeight;
+	total /= (long long)(3LL * sceneConfig.imageWidth * sceneConfig.imageHeight);
 	cerr << "avg: " << total << endl;
 	cerr << "max: " << maxColor << endl;
 }
@@ -1547,7 +1547,7 @@ void Sunfish::saveImage() {
 
 
 int main(int argc, const char** argv) {
-	RTrandom.Init(32768);
+	RTrandom.init(32768);
 	Sunfish sunfish{ argc, argv };
 	sunfish.loadScene();
 	sunfish.render(100);
@@ -1583,8 +1583,8 @@ int main(int argc, const char** argv) {
 	Scene pathTracerScene;
 
 	pathTracerScene.camera.lensRadius = 0.0f;// 0.1f;
-	pathTracerScene.camera.SetProjection(45.0f, float(nx) / float(ny), 0.001f, 100.0f);
-	pathTracerScene.camera.SetLookAt(Vector3f(0.0f, 0.0f, 1.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f));
+	pathTracerScene.camera.setProjection(45.0f, float(nx) / float(ny), 0.001f, 100.0f);
+	pathTracerScene.camera.setLookAt(Vector3f(0.0f, 0.0f, 1.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f));
 
 	auto start = std::chrono::steady_clock::now();
 
@@ -1647,7 +1647,7 @@ int main(int argc, const char** argv) {
 		wc.scene = &pathTracerScene;
 		wc.sceneConfig = &sceneConfig;
 
-		PathTraceWorker(&wc);
+		pathTraceWorker(&wc);
 	}
 	else {
 		vector<WorkerContext> wcs;
@@ -1671,7 +1671,7 @@ int main(int argc, const char** argv) {
 
 		for (auto wc = wcs.begin(); wc != wcs.end(); wc++) {
 			WorkerContext* pwc = &(*wc);
-			futures.push_back(async(PathTraceWorker, pwc));
+			futures.push_back(async(pathTraceWorker, pwc));
 		}
 
 		int i = 0;
@@ -1743,11 +1743,11 @@ int main(int argc, const char** argv) {
 			if (ig > maxColor) maxColor = ig;
 			if (ib > maxColor) maxColor = ib;
 
-			total += (long long)(ir + ig + ib);
+			total += (long long)ir + ig + ib;
 		}
 	}
 
-	total /= 3 * sceneConfig.imageWidth * sceneConfig.imageHeight;
+	total /= (long long)(3LL * sceneConfig.imageWidth * sceneConfig.imageHeight);
 	cerr << "avg: " << total << endl;
 	cerr << "max: " << maxColor << endl;
 
