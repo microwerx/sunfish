@@ -1,7 +1,41 @@
-// SUNFISH Path Tracer
-// (C) 2015-2020 Jonathan Metzgar
-// Sunfish is a Monte Carlo path tracer for physically based rendering in as simple a way possible
-
+// Copyright (c) 2015-2020 Jonathan Metzgar
+//
+// Sunfish is a Monte Carlo path tracer for physically based rendering in as
+// simple a way possible. To that end the following features are planned:
+//
+// * Ray Generation, Ray Intersection, and custom shaders
+//   * Intersection
+//   * Closest hit
+//   * Any hit
+//   * Miss
+// * Ray-Sphere, Ray-Box, and Ray-Triangle intersections
+// * Signed distance functions
+// * Custom number of samples per pixel
+// * Custom camera to support DOF
+//
+// The design of this software is to have an OpenGL based via GLFW viewer showing
+// the current progress of the rendering.
+////////////////////////////////////////////////////////////////////////////////
+// MIT License
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+////////////////////////////////////////////////////////////////////////////////
 #include <vector>
 #include <string>
 #include <random>
@@ -16,10 +50,18 @@
 #include <fluxions_ssg.hpp>
 //#include <viperfish_utilities.hpp>
 
+#pragma comment(lib, "hatchetfish.lib")
+#pragma comment(lib, "fluxions-gte.lib")
 #pragma comment(lib, "fluxions.lib")
 
 using namespace std;
 using namespace Fluxions;
+
+
+//////////////////////////////////////////////////////////////////////
+// RandomLUT /////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
 
 class RandomLUT {
 public:
@@ -48,13 +90,16 @@ private:
 	mt19937 _irand_s;
 };
 
+
 RandomLUT::RandomLUT() {
 	Init(32768);
 }
 
+
 RandomLUT::RandomLUT(int size) {
 	Init(size);
 }
+
 
 void RandomLUT::Init(int size) {
 	this->size = size;
@@ -71,11 +116,13 @@ void RandomLUT::Init(int size) {
 	curIndex = 0;
 }
 
+
 float RandomLUT::frand() {
 	curIndex = (curIndex + 1);
 	if (curIndex >= size) curIndex = 0;
 	return frandom[curIndex];
 }
+
 
 double RandomLUT::drand() {
 	curIndex = (curIndex + 1);
@@ -84,12 +131,14 @@ double RandomLUT::drand() {
 	return drandom[curIndex];
 }
 
+
 int RandomLUT::irand() {
 	curIndex = (curIndex + 1);
 	if (curIndex >= size) curIndex = 0;
 
 	return irandom[curIndex];
 }
+
 
 float RandomLUT::_frand(float t0, float t1) {
 	uniform_real_distribution<float> urd(t0, t1);
@@ -108,12 +157,19 @@ int RandomLUT::_irand(int t0, int t1) {
 	return uid(_irand_s);
 }
 
+
 void RandomLUT::Seed(int seed) {
 	curIndex = seed % frandom.size();
 }
 
 
+//////////////////////////////////////////////////////////////////////
+// Random Vectors ////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
+
 RandomLUT RTrandom;
+
 
 Vector3f getRandomUnitSphereVector() {
 	Vector3f p;
@@ -123,6 +179,7 @@ Vector3f getRandomUnitSphereVector() {
 	return p;
 }
 
+
 Vector3f getRandomUnitDiscVector() {
 	Vector3f p;
 	do {
@@ -130,6 +187,46 @@ Vector3f getRandomUnitDiscVector() {
 	} while (dot(p, p) >= 1.0f);
 	return p;
 }
+
+
+//////////////////////////////////////////////////////////////////////
+// Utility Functions /////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
+
+Vector3f reflect(const Vector3f& v, const Vector3f& n) {
+	return v - 2.0f * DotProduct(v, n) * n;
+}
+
+
+bool refract(const Vector3f& v, const Vector3f& n, float ni_over_nt, Vector3f& refracted) {
+	Vector3f uv = v.unit();
+	float dt = DotProduct(uv, n);
+	float discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dt * dt);
+	if (discriminant > 0.0f) {
+		refracted = ni_over_nt * (v - n * dt) - n * sqrt(discriminant);
+		return true;
+	}
+	return false;
+}
+
+
+float schlick(float cosine, float F_0) {
+	float r0 = (1.0f - F_0) / (1.0f + F_0);
+	r0 = r0 * r0;
+	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+// Camera ////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// A Camera is a type of ray generation because we generate rays
+// from the source of the camera into the scene.
+//
+// TODO:
+// [ ] Reframe as a subclass of Ray Generation class
+//////////////////////////////////////////////////////////////////////
 
 
 class Camera {
@@ -179,6 +276,7 @@ private:
 	void computeParameters();
 };
 
+
 Camera::Camera() {
 	Init(Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f), 90.0f, 2.0f, 0.001f, 100.0f);
 	lensRadius = 1.0f;
@@ -188,16 +286,19 @@ Camera::Camera() {
 	//origin=Vector3f(0.0, 0.0, 0.0);
 }
 
+
 Camera::Camera(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture, float distance_to_focus) {
 	Init(origin, center, up, yfovInDegrees, aspectRatio, znear, zfar);
 	SetLense(aperture, (center - eye).length());
 }
+
 
 void Camera::Init(Vector3f eye, Vector3f center, Vector3f up, float yfovInDegrees, float aspectRatio, float znear, float zfar, float aperture, float distance_to_focus) {
 	SetProjection(yfovInDegrees, aspectRatio, znear, zfar);
 	SetLookAt(eye, center, up);
 	SetLense(aperture, distance_to_focus);
 }
+
 
 void Camera::SetLense(float aperture, float distance_to_focus) {
 	this->aperture = aperture;
@@ -206,6 +307,7 @@ void Camera::SetLense(float aperture, float distance_to_focus) {
 	else
 		this->distance_to_focus = distance_to_focus;
 }
+
 
 void Camera::SetProjection(float fovyInDegrees, float aspectRatio, float znear, float zfar) {
 	this->fovy = fovyInDegrees;
@@ -224,6 +326,7 @@ void Camera::SetProjection(float fovyInDegrees, float aspectRatio, float znear, 
 	computeParameters();
 }
 
+
 void Camera::SetLookAt(Vector3f eye, Vector3f center, Vector3f up) {
 	this->eye = eye;
 	this->center = center;
@@ -239,15 +342,18 @@ void Camera::SetLookAt(Vector3f eye, Vector3f center, Vector3f up) {
 	computeParameters();
 }
 
+
 Rayf Camera::getRay(float s, float t) {
 	return Rayf(origin, lowerLeftCorner + s * horizontal + t * vertical - origin);
 }
+
 
 Rayf Camera::getRayDOF(float s, float t) {
 	Vector3f rd = lensRadius * getRandomUnitDiscVector();
 	Vector3f offset = u * rd.x + v * rd.y;
 	return Rayf(origin + offset, lowerLeftCorner + s * horizontal + t * vertical - origin - offset);
 }
+
 
 void Camera::computeParameters() {
 	float theta = float(fovy * FX_DEGREES_TO_RADIANS);
@@ -262,6 +368,15 @@ void Camera::computeParameters() {
 	lowerLeftCorner = origin - (distance_to_focus * halfWidth) * u - (distance_to_focus * halfHeight) * v - distance_to_focus * w;
 }
 
+
+//////////////////////////////////////////////////////////////////////
+// HitRecord /////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// A HitRecord is used to fill in details about a ray-object
+// intersection.
+//////////////////////////////////////////////////////////////////////
+
+
 class Material;
 
 struct HitRecord {
@@ -273,10 +388,21 @@ struct HitRecord {
 };
 
 
+//////////////////////////////////////////////////////////////////////
+// RayTraceObject ////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// A RayTraceObject is used as a base class for an object that can
+// be intersected by a ray. It supports the virtual methods:
+// - closest_hit
+// - any_hit
+//////////////////////////////////////////////////////////////////////
+
+
 class RayTraceObject {
 public:
 	RayTraceObject() {}
 	RayTraceObject(const string& name) : name(name) {}
+
 	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		rec.pmaterial = material;
 		return false;
@@ -291,21 +417,45 @@ public:
 };
 
 
+//////////////////////////////////////////////////////////////////////
+// InstancedRTO //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// An InstancedRTO implements the closest_hit and any_hit methods from
+// a RayTraceObject. It is initialized with a pointer to a different
+// object.
+//
+// TODO:
+// [ ] Allow separate material
+//////////////////////////////////////////////////////////////////////
+
+
 class InstancedRTO : public RayTraceObject {
 public:
 	InstancedRTO() : pRTO(nullptr) {}
 	InstancedRTO(const string& name, RayTraceObject* rto)
 		: RayTraceObject(name), pRTO(rto) {}
+
 	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		if (pRTO) pRTO->closest_hit(r, tMin, tMax, rec);
 		return false;
 	}
+
 	virtual bool any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		if (pRTO) pRTO->any_hit(r, tMin, tMax, rec);
 		return false;
 	}
+
 	RayTraceObject* pRTO;
 };
+
+
+//////////////////////////////////////////////////////////////////////
+// RtoList ///////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// An RtoList is an object with several objects which is useful for
+// representing a group or scene with a common transformation.
+//////////////////////////////////////////////////////////////////////
+
 
 class RtoList : RayTraceObject {
 public:
@@ -323,6 +473,7 @@ public:
 
 	vector<RayTraceObject*> RTOs;
 };
+
 
 bool RtoList::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 	HitRecord tempRec;
@@ -355,6 +506,16 @@ bool RtoList::any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) con
 }
 
 
+//////////////////////////////////////////////////////////////////////
+// RtoSphere /////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// An RtoSphere is a ray trace object representing a sphere.
+//
+// TODO:
+// [ ] implement any_hit
+//////////////////////////////////////////////////////////////////////
+
+
 class RtoSphere : public RayTraceObject {
 public:
 	RtoSphere() {}
@@ -364,10 +525,12 @@ public:
 	}
 
 	virtual bool closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
+	//virtual bool any_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
 
 	Vector3f center;
-	float radius;
+	float radius{ 1.0f };
 };
+
 
 bool RtoSphere::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 	Vector3f oc = r.origin - center;
@@ -397,6 +560,7 @@ bool RtoSphere::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& re
 	return false;
 }
 
+
 //float hit_sphere(const Vector3f &center, float radius, const Rayf &r)
 //{
 //	Vector3f oc = r.origin - center;
@@ -413,6 +577,27 @@ bool RtoSphere::closest_hit(const Rayf& r, float tMin, float tMax, HitRecord& re
 //		return (-b - sqrt(discriminant)) / (2.0f*a);
 //	}
 //}
+
+
+//////////////////////////////////////////////////////////////////////
+// Material //////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// A Material represents the custom appearance of an object. Child
+// classes would override the following virtual methods:
+// - shadeClosestHit
+// - shadeAnyHit
+// - shadeMissedHit
+// - scatter
+//
+// The scatter function is used to spawn a ray in a random direction
+// according to the material properties. For example, a smooth metal
+// object might only spawn a ray in the reflection direction. A rough
+// object might spawn a ray in a random direction in the hemisphere.
+//
+// TODO:
+// [ ] Change virtual methods to pointers to objects or functions
+//////////////////////////////////////////////////////////////////////
+
 
 class Material {
 public:
@@ -431,21 +616,26 @@ public:
 	Vector3f shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment);
 };
 
+
 Vector3f Material::shadeClosestHit(const Rayf& r, const HitRecord& rec) {
 	return Vector3f(0.0f, 1.0f, 0.0f);
 }
+
 
 Vector3f Material::shadeAnyHit(const Rayf& r, const HitRecord& rec) {
 	return Vector3f(1.0f, 0.0f, 0.0f);
 }
 
+
 Vector3f Material::shadeMissedHit(const Rayf& r, const SimpleEnvironment& environment) {
 	return shadeHosekWilkieSky(r, environment);
 }
 
+
 bool Material::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const {
 	return true;
 }
+
 
 Vector3f Material::shadeShirleySky(const Rayf& r, const SimpleEnvironment& environment) {
 	// no hits, so return background color
@@ -453,6 +643,7 @@ Vector3f Material::shadeShirleySky(const Rayf& r, const SimpleEnvironment& envir
 	float t = 0.5f * unit_direction.y + 1.0f;
 	return (1.0f - t) * Vector3f(1.0f, 1.0f, 1.0f) + t * Vector3f(0.5f, 0.7f, 1.0f);
 }
+
 
 Vector3f Material::shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment) {
 	Color4f color = environment.pbsky.generatedSunCubeMap.getPixelCubeMap(r.direction.x, max(0.0f, r.direction.y), r.direction.z);
@@ -462,6 +653,14 @@ Vector3f Material::shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& e
 	//float t = 0.5f * unit_direction.y + 1.0f;
 	//return (1.0f - t)*Vector3f(1.0f, 1.0f, 1.0f) + t*Vector3f(0.5f, 0.7f, 1.0f);
 }
+
+
+//////////////////////////////////////////////////////////////////////
+// LambertianMaterial ////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// LambertianMaterial is a child class of Material which 
+//////////////////////////////////////////////////////////////////////
+
 
 class LambertianMaterial : public Material {
 public:
@@ -478,26 +677,14 @@ bool LambertianMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector
 	return true;
 }
 
-Vector3f reflect(const Vector3f& v, const Vector3f& n) {
-	return v - 2.0f * DotProduct(v, n) * n;
-}
 
-bool refract(const Vector3f& v, const Vector3f& n, float ni_over_nt, Vector3f& refracted) {
-	Vector3f uv = v.unit();
-	float dt = DotProduct(uv, n);
-	float discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dt * dt);
-	if (discriminant > 0.0f) {
-		refracted = ni_over_nt * (v - n * dt) - n * sqrt(discriminant);
-		return true;
-	}
-	return false;
-}
+//////////////////////////////////////////////////////////////////////
+// MetalMaterial /////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// MetalMaterial is a child of Material and simulates a metal surface
+// which may have a little roughness associated with it.
+//////////////////////////////////////////////////////////////////////
 
-float schlick(float cosine, float F_0) {
-	float r0 = (1.0f - F_0) / (1.0f + F_0);
-	r0 = r0 * r0;
-	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
-}
 
 class MetalMaterial : public Material {
 public:
@@ -508,12 +695,23 @@ public:
 	float fuzz;
 };
 
+
 bool MetalMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const {
 	Vector3f reflected = reflect(rayIn.direction.unit(), rec.normal);
 	scatteredRay = Rayf(rec.p, reflected + fuzz * getRandomUnitSphereVector());
 	attenuation = albedo;
 	return (DotProduct(scatteredRay.direction, rec.normal) > 0);
 }
+
+
+//////////////////////////////////////////////////////////////////////
+// DielectricMaterial ////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// DielectricMaterial is a child of Material which simulates a 
+// dielectric translucent object. It uses Russian Roulette to refract
+// or reflect a ray according to the Fresnel reflection.
+//////////////////////////////////////////////////////////////////////
+
 
 class DielectricMaterial : public Material {
 public:
@@ -563,6 +761,15 @@ bool DielectricMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector
 	return true;
 }
 
+
+//////////////////////////////////////////////////////////////////////
+// NormalShadeMaterial ///////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// NormalShadeMaterial is a child of Material which implements a debug
+// material to return the normal of the surface.
+//////////////////////////////////////////////////////////////////////
+
+
 class NormalShadeMaterial : public Material {
 public:
 	NormalShadeMaterial() {}
@@ -571,6 +778,7 @@ public:
 		return 0.5f * (1.0f + rec.normal);
 	}
 };
+
 
 //Vector3f Trace(const Rayf &r, RtoList &world, int depth, const SimpleEnvironment &environment)
 //{
@@ -614,6 +822,16 @@ public:
 //}
 
 
+//////////////////////////////////////////////////////////////////////
+// Scene /////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// Scene is a class to put all the objects, cameras, and lights in a
+// collection.
+// 
+// TODO: Perhaps this would be better as a simple database
+//////////////////////////////////////////////////////////////////////
+
+
 class Scene {
 public:
 	Scene();
@@ -632,17 +850,14 @@ public:
 	map<string, RayTraceObject*> geometry;
 	map<string, Material*> materials;
 private:
-	Material* pCurMtl;
+	Material* pCurMtl{ nullptr };
 };
 
-Scene::Scene() {
 
-}
+Scene::Scene() {}
 
 
-Scene::~Scene() {
-
-}
+Scene::~Scene() {}
 
 
 void Scene::AddRTO(const string& name, RayTraceObject* rto) {
@@ -690,6 +905,13 @@ void Scene::Render() {
 }
 
 
+//////////////////////////////////////////////////////////////////////
+// SceneConfiguration ////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// SceneConfiguration stores the configuration of the path tracer.
+// Perhaps this would be better if we renamed it SunfishConfig instead.
+//////////////////////////////////////////////////////////////////////
+
 class SceneConfiguration {
 public:
 	SceneConfiguration(int argc, const char** argv);
@@ -697,8 +919,9 @@ public:
 
 	void printHelp();
 
-	int imageWidth;
-	int imageHeight;
+	unsigned imageWidth;
+	unsigned imageHeight;
+	float imageAspect{ 1.0f };
 	bool isServer;
 	bool isWorker;
 	int numWorkers;
@@ -732,7 +955,7 @@ bool SceneConfiguration::GetParameterf(int argc, const char** argv, int* i, cons
 		if (*i + 1 <= argc) {
 			// peek next
 			*value = (float)atof(argv[*i + 1]);
-			*i++;
+			(*i)++;
 			return true;
 		}
 	}
@@ -743,12 +966,13 @@ bool SceneConfiguration::GetParameterf(int argc, const char** argv, int* i, cons
 int SceneConfiguration::GetParameteri(int argc, const char** argv, int* i, const string& parameter) {
 	if (*i < 0 || *i >= argc) return 0;
 
-	int value;
+	int value{ 0 };
 	if (parameter == argv[*i]) {
 		if (*i + 1 <= argc) {
 			// peek next
 			value = (int)atoi(argv[*i + 1]);
-			*i++;
+			// increment next parameter
+			(*i)++;
 		}
 	}
 	return value;
@@ -758,12 +982,12 @@ int SceneConfiguration::GetParameteri(int argc, const char** argv, int* i, const
 string SceneConfiguration::GetParameters(int argc, const char** argv, int* i, const string& parameter) {
 	if (*i < 0 || *i >= argc) return string();
 
-	string value;
+	string value{ "" };
 	if (parameter == argv[*i]) {
 		if (*i + 1 <= argc) {
 			// peek next
 			value = argv[*i + 1];
-			*i++;
+			(*i)++;
 		}
 	}
 	return value;
@@ -935,10 +1159,11 @@ SceneConfiguration::~SceneConfiguration() {
 
 
 void SceneConfiguration::printHelp() {
+	cerr << "Sunfish" << endl;
 	cerr << "Physically Based Monte Carlo Path Tracer" << endl;
 	cerr << "========================================" << endl;
 	cerr << "by Jonathan Metzgar" << endl;
-	cerr << "GNU Public License version 3" << endl;
+	cerr << "Licensed via the MIT License" << endl;
 	cerr << endl;
 	cerr << "Help" << endl;
 	cerr << "----" << endl;
@@ -968,6 +1193,14 @@ void SceneConfiguration::printHelp() {
 }
 
 
+//////////////////////////////////////////////////////////////////////
+// WorkerContext /////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// WorkerContext is the information needed for a worker to trace rays
+// for a subrectangle on the screen.
+//////////////////////////////////////////////////////////////////////
+
+
 struct WorkerContext {
 	int left;
 	int bottom;
@@ -978,9 +1211,12 @@ struct WorkerContext {
 	SceneConfiguration* sceneConfig{ nullptr };
 };
 
+
 int PathTraceWorker(WorkerContext* wc);
 
+
 mutex framebuffer_mutex;
+
 
 int PathTraceWorker(WorkerContext* wc) {
 	if (wc == nullptr || wc->scene == nullptr || wc->sceneConfig == nullptr || wc->framebuffer == nullptr) {
@@ -1022,10 +1258,303 @@ int PathTraceWorker(WorkerContext* wc) {
 }
 
 
-int main(int argc, const char** argv) {
-	SceneConfiguration sceneConfiguration(argc, argv);
+//////////////////////////////////////////////////////////////////////
+// Sunfish ///////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// Renders a scene. If no scene is provided, then it creates a default
+// scene. The order to call Sunfish is:
+//
+// Sunfish sunfish{argc, argv};
+// sunfish.loadScene();
+// sunfish.renderStart();
+// for (int i = 0; i < 100; i++) {
+//   sunfish.renderStep();
+// }
+// sunfish.renderStop();
+// sunfish.saveImage();
+//////////////////////////////////////////////////////////////////////
 
+
+class Sunfish {
+public:
+	Sunfish(int argc, const char** argv);
+
+	void loadScene();
+	void renderStart();
+	bool renderStep();
+	void renderStop();
+	void render(unsigned numIterations);
+	void saveImage();
+private:
+	SceneConfiguration sceneConfig;
+	RtoList world;
+	NormalShadeMaterial normalShader;
+	Scene pathTracerScene;
+	Image4f framebuffer;
+
+	void makeDefaultScene_();
+};
+
+
+Sunfish::Sunfish(int argc, const char** argv) :
+	sceneConfig(argc, argv) {}
+
+
+void Sunfish::loadScene() {
+	if (sceneConfig.imageWidth == 0) {
+		sceneConfig.imageWidth = 1280;
+	}
+	if (sceneConfig.imageHeight == 0) {
+		sceneConfig.imageHeight = 720;
+	}
+	sceneConfig.imageAspect = float(sceneConfig.imageWidth) / float(sceneConfig.imageHeight);
+}
+
+
+void Sunfish::makeDefaultScene_() {
+	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Vector3f(0.8f, 0.1f, 0.1f), 0.05f)));
+	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Vector3f(0.1f, 0.2f, 0.5f))));
+	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -100.5f, -1.0f), 100.0f, new LambertianMaterial(Vector3f(0.8f, 0.8f, 0.0f))));
+	world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Vector3f(0.8f, 0.6f, 0.2f), 0.0f)));
+	world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
+
+	pathTracerScene.camera.lensRadius = 0.0f;// 0.1f;
+	pathTracerScene.camera.SetProjection(45.0f, sceneConfig.imageAspect, 0.001f, 100.0f);
+	pathTracerScene.camera.SetLookAt(Vector3f(0.0f, 0.0f, 1.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f));
+
+	auto start = std::chrono::steady_clock::now();
+
+	Hf::StopWatch stopwatch;
+	pathTracerScene.ssg.environment.pbsky.SetGroundAlbedo(0.1f, 0.1f, 0.1f);
+	pathTracerScene.ssg.environment.pbsky.SetLocalDate(1, 5, 2016, true, -4);
+	pathTracerScene.ssg.environment.pbsky.SetLocalTime(10, 0, 0, 0.0f);
+	pathTracerScene.ssg.environment.pbsky.SetLocation(27.907360f, -82.324440f);
+	pathTracerScene.ssg.environment.pbsky.SetTurbidity(sceneConfig.sun_turbidity);
+	pathTracerScene.ssg.environment.pbsky.SetNumSamples(1);
+	pathTracerScene.ssg.environment.pbsky.computeAstroFromLocale();
+	pathTracerScene.ssg.environment.pbsky.ComputeCubeMap(256, false, 8.0f, true);
+	pathTracerScene.ssg.environment.pbsky.ComputeCylinderMap(512, 128);
+	stopwatch.Stop();
+	auto end = std::chrono::steady_clock::now();
+	auto diff = end - start;
+	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
+
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_0.ppm", 0);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_1.ppm", 1);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_2.ppm", 2);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_3.ppm", 3);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_4.ppm", 4);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_5.ppm", 5);
+	pathTracerScene.ssg.environment.pbsky.generatedSunCylMap.savePPM("pbsky_cylmap.ppm");
+
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Vector3f(0.8f, 0.1f, 0.1f), 0.05f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Vector3f(0.1f, 0.2f, 0.5f))));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -10000.5f, -1.0f), 10000.0f, new LambertianMaterial(Vector3f(0.8f, 0.8f, 0.0f))));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Vector3f(0.8f, 0.6f, 0.2f), 0.0f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
+
+	if (0) {
+		for (int curObj = 0; curObj < 100; curObj++) {
+			Vector3f disc = getRandomUnitDiscVector();
+			Vector3f color = 0.5f * (1.0f + getRandomUnitSphereVector().unit());
+
+			//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, 0.025f, 4.0f * disc.y), 0.025f, new LambertianMaterial(color)));
+			pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, rand() / (float)RAND_MAX, 4.0f * disc.y), 0.1f * rand() / (float)RAND_MAX, new MetalMaterial(color, rand() / (float)RAND_MAX)));
+		}
+	}
+	//pathTracer.AddRTO("smallSphere", new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f));
+	//pathTracer.AddRTO("largeSphere", new RtoSphere(Vector3f(0.0f, -100.5f, -1.0f), 100.0f));
+	//pathTracer.AddInstance("smallSphere01", "smallSphere");
+	//pathTracer.AddInstance("largeSphere01", "largeSphere");
+	//pathTracer.AddMaterial("normalShader", new NormalShadeMaterial);
+}
+
+
+void Sunfish::render(unsigned numIterations) {
+	renderStart();
+	for (auto i = 0U; i < numIterations; i++) {
+		renderStep();
+	}
+	renderStop();
+}
+
+
+void Sunfish::renderStart() {
+	time_t t0, t1, dt;
+
+	t0 = time(NULL);
+	constexpr unsigned nx = 1280;
+	constexpr unsigned ny = 720;
+	constexpr unsigned nz = 1;
+	framebuffer = Image4f{ nx, ny, nz };
+
+
+	makeDefaultScene_();
+
+
+	auto start = std::chrono::steady_clock::now();
+
+	if (0) {
+		WorkerContext wc;
+
+		wc.left = 0;
+		wc.right = sceneConfig.imageWidth - 1;
+		wc.top = 0;
+		wc.bottom = sceneConfig.imageHeight - 1;
+		wc.framebuffer = &framebuffer;
+		wc.scene = &pathTracerScene;
+		wc.sceneConfig = &sceneConfig;
+
+		PathTraceWorker(&wc);
+	}
+	else {
+		vector<WorkerContext> wcs;
+		vector<future<int>> futures;
+
+		for (int i = 0; i < sceneConfig.imageWidth; i += sceneConfig.workgroupSizeX) {
+			for (int j = 0; j < sceneConfig.imageHeight; j += sceneConfig.workgroupSizeY) {
+				WorkerContext wc;
+
+				wc.left = i;
+				wc.right = std::min<int>(i + sceneConfig.workgroupSizeX - 1, sceneConfig.imageWidth - 1);
+				wc.top = j;
+				wc.bottom = std::min<int>(j + sceneConfig.workgroupSizeY - 1, sceneConfig.imageHeight - 1);
+				wc.framebuffer = &framebuffer;
+				wc.scene = &pathTracerScene;
+				wc.sceneConfig = &sceneConfig;
+
+				wcs.push_back(wc);
+			}
+		}
+
+		for (auto wc = wcs.begin(); wc != wcs.end(); wc++) {
+			WorkerContext* pwc = &(*wc);
+			futures.push_back(async(PathTraceWorker, pwc));
+		}
+
+		int i = 0;
+		for (auto& f : futures) {
+			int result = f.get();
+			i++;
+			cerr << i << " " << flush;
+		}
+		cerr << endl;
+	}
+
+	auto end = std::chrono::steady_clock::now();
+	auto diff = end - start;
+	std::cerr << std::chrono::duration <double, std::milli>(diff).count() << " ms" << std::endl;
+
+
+	//const int maxSamples = sceneConfig.samplesPerPixel;
+	//const float invSampleScale = 1.0f / maxSamples;
+
+	//for (int j = ny - 1; j >= 0; j--)
+	//{
+	//	for (int i = 0; i < nx; i++)
+	//	{
+	//		Vector3f finalColor(0.0f, 0.0f, 0.0f);
+	//		for (int s = 0; s < maxSamples; s++)
+	//		{
+	//			float u = float(i + RTrandom.frand()*sceneConfig.jitterRadius) / float(nx);
+	//			float v = float(j + RTrandom.frand()*sceneConfig.jitterRadius) / float(ny);
+
+	//			Rayf r = pathTracerScene.camera.getRayDOF(u, v);
+	//			Vector3f p = r.getPointAtParameter(2.0f);
+	//			finalColor += Trace(r, world, 0);
+	//		}
+
+	//		// Post processing step...
+	//		finalColor *= invSampleScale;
+
+	//		// gamma correct image
+	//		//finalColor = Vector3f(sqrt(finalColor.r), sqrt(finalColor.g), sqrt(finalColor.b));
+	//		
+	//		Color4f gammaCorrectedColor = Color4f(sqrt(finalColor.r), sqrt(finalColor.g), sqrt(finalColor.b), 1.0f);
+	//		framebuffer.setPixel(i, j, gammaCorrectedColor);
+
+	//		//int ir = int(255.99f*finalColor.r);
+	//		//int ig = int(255.99f*finalColor.g);
+	//		//int ib = int(255.99f*finalColor.b);
+
+	//		//cout << ir << " " << ig << " " << ib << "\n";
+	//	}
+	//	//cout << flush;
+	//}
+
+	t1 = time(NULL);
+	dt = t1 - t0;
+	cerr << "Total time: " << dt << endl;
+}
+
+
+bool Sunfish::renderStep() {
+	return true;
+}
+
+
+void Sunfish::renderStop() {
+	lock_guard<mutex> guard(framebuffer_mutex);
+
+	int maxColor = 0;
+	long long int total = 0;
+
+	for (int j = sceneConfig.imageHeight - 1; j >= 0; j--) {
+		for (int i = 0; i < sceneConfig.imageWidth; i++) {
+			Color4f finalColor = framebuffer.getPixel(i, j);
+			int ir = int(255.99f * finalColor.r);
+			int ig = int(255.99f * finalColor.g);
+			int ib = int(255.99f * finalColor.b);
+			if (ir > maxColor) maxColor = ir;
+			if (ig > maxColor) maxColor = ig;
+			if (ib > maxColor) maxColor = ib;
+
+			total += ir + ig + ib;
+		}
+	}
+
+	total /= 3 * sceneConfig.imageWidth * sceneConfig.imageHeight;
+	cerr << "avg: " << total << endl;
+	cerr << "max: " << maxColor << endl;
+}
+
+
+void Sunfish::saveImage() {
+	//cout << "P3\n" << sceneConfig.imageWidth << " " << sceneConfig.imageHeight << "\n" << maxColor << "\n";
+
+	//for (int j = sceneConfig.imageHeight - 1; j >= 0; j--) {
+	//	for (int i = 0; i < sceneConfig.imageWidth; i++) {
+	//		Color4f finalColor = framebuffer.getPixel(i, j);
+	//		int ir = int(255.99f * finalColor.r);
+	//		int ig = int(255.99f * finalColor.g);
+	//		int ib = int(255.99f * finalColor.b);
+
+	//		cout << ir << " " << ig << " " << ib << "\n";
+	//	}
+	//	cout << flush;
+	//}
+
+	framebuffer.flipY();
+	framebuffer.saveEXR("output.exr");
+}
+
+
+//////////////////////////////////////////////////////////////////////
+// main() ////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// entry point for the program
+//////////////////////////////////////////////////////////////////////
+
+
+int main(int argc, const char** argv) {
 	RTrandom.Init(32768);
+	Sunfish sunfish{ argc, argv };
+	sunfish.loadScene();
+	sunfish.render(100);
+	sunfish.saveImage();
+	return 0;
+
+	SceneConfiguration sceneConfig(argc, argv);
 
 	time_t t0, t1, dt;
 
@@ -1064,7 +1593,7 @@ int main(int argc, const char** argv) {
 	pathTracerScene.ssg.environment.pbsky.SetLocalDate(1, 5, 2016, true, -4);
 	pathTracerScene.ssg.environment.pbsky.SetLocalTime(10, 0, 0, 0.0f);
 	pathTracerScene.ssg.environment.pbsky.SetLocation(27.907360f, -82.324440f);
-	pathTracerScene.ssg.environment.pbsky.SetTurbidity(sceneConfiguration.sun_turbidity);
+	pathTracerScene.ssg.environment.pbsky.SetTurbidity(sceneConfig.sun_turbidity);
 	pathTracerScene.ssg.environment.pbsky.SetNumSamples(1);
 	pathTracerScene.ssg.environment.pbsky.computeAstroFromLocale();
 	pathTracerScene.ssg.environment.pbsky.ComputeCubeMap(256, false, 8.0f, true);
@@ -1072,7 +1601,6 @@ int main(int argc, const char** argv) {
 	stopwatch.Stop();
 	auto end = std::chrono::steady_clock::now();
 	auto diff = end - start;
-	//std::cerr << "Hosek Wilkie: " << std::chrono::duration <double, std::milli>(diff).count() << " ms" << std::endl;
 	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
 
 	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_0.ppm", 0);
@@ -1112,12 +1640,12 @@ int main(int argc, const char** argv) {
 		WorkerContext wc;
 
 		wc.left = 0;
-		wc.right = sceneConfiguration.imageWidth - 1;
+		wc.right = sceneConfig.imageWidth - 1;
 		wc.top = 0;
-		wc.bottom = sceneConfiguration.imageHeight - 1;
+		wc.bottom = sceneConfig.imageHeight - 1;
 		wc.framebuffer = &framebuffer;
 		wc.scene = &pathTracerScene;
-		wc.sceneConfig = &sceneConfiguration;
+		wc.sceneConfig = &sceneConfig;
 
 		PathTraceWorker(&wc);
 	}
@@ -1125,17 +1653,17 @@ int main(int argc, const char** argv) {
 		vector<WorkerContext> wcs;
 		vector<future<int>> futures;
 
-		for (int i = 0; i < sceneConfiguration.imageWidth; i += sceneConfiguration.workgroupSizeX) {
-			for (int j = 0; j < sceneConfiguration.imageHeight; j += sceneConfiguration.workgroupSizeY) {
+		for (int i = 0; i < sceneConfig.imageWidth; i += sceneConfig.workgroupSizeX) {
+			for (int j = 0; j < sceneConfig.imageHeight; j += sceneConfig.workgroupSizeY) {
 				WorkerContext wc;
 
 				wc.left = i;
-				wc.right = min(i + sceneConfiguration.workgroupSizeX - 1, sceneConfiguration.imageWidth - 1);
+				wc.right = std::min<int>(i + sceneConfig.workgroupSizeX - 1, sceneConfig.imageWidth - 1);
 				wc.top = j;
-				wc.bottom = min(j + sceneConfiguration.workgroupSizeY - 1, sceneConfiguration.imageHeight - 1);
+				wc.bottom = std::min<int>(j + sceneConfig.workgroupSizeY - 1, sceneConfig.imageHeight - 1);
 				wc.framebuffer = &framebuffer;
 				wc.scene = &pathTracerScene;
-				wc.sceneConfig = &sceneConfiguration;
+				wc.sceneConfig = &sceneConfig;
 
 				wcs.push_back(wc);
 			}
@@ -1160,7 +1688,7 @@ int main(int argc, const char** argv) {
 	std::cerr << std::chrono::duration <double, std::milli>(diff).count() << " ms" << std::endl;
 
 
-	//const int maxSamples = sceneConfiguration.samplesPerPixel;
+	//const int maxSamples = sceneConfig.samplesPerPixel;
 	//const float invSampleScale = 1.0f / maxSamples;
 
 	//for (int j = ny - 1; j >= 0; j--)
@@ -1170,8 +1698,8 @@ int main(int argc, const char** argv) {
 	//		Vector3f finalColor(0.0f, 0.0f, 0.0f);
 	//		for (int s = 0; s < maxSamples; s++)
 	//		{
-	//			float u = float(i + RTrandom.frand()*sceneConfiguration.jitterRadius) / float(nx);
-	//			float v = float(j + RTrandom.frand()*sceneConfiguration.jitterRadius) / float(ny);
+	//			float u = float(i + RTrandom.frand()*sceneConfig.jitterRadius) / float(nx);
+	//			float v = float(j + RTrandom.frand()*sceneConfig.jitterRadius) / float(ny);
 
 	//			Rayf r = pathTracerScene.camera.getRayDOF(u, v);
 	//			Vector3f p = r.getPointAtParameter(2.0f);
@@ -1205,8 +1733,8 @@ int main(int argc, const char** argv) {
 	int maxColor = 0;
 	long long int total = 0;
 
-	for (int j = sceneConfiguration.imageHeight - 1; j >= 0; j--) {
-		for (int i = 0; i < sceneConfiguration.imageWidth; i++) {
+	for (int j = sceneConfig.imageHeight - 1; j >= 0; j--) {
+		for (int i = 0; i < sceneConfig.imageWidth; i++) {
 			Color4f finalColor = framebuffer.getPixel(i, j);
 			int ir = int(255.99f * finalColor.r);
 			int ig = int(255.99f * finalColor.g);
@@ -1215,18 +1743,18 @@ int main(int argc, const char** argv) {
 			if (ig > maxColor) maxColor = ig;
 			if (ib > maxColor) maxColor = ib;
 
-			total += ir + ig + ib;
+			total += (long long)(ir + ig + ib);
 		}
 	}
 
-	total /= 3 * sceneConfiguration.imageWidth * sceneConfiguration.imageHeight;
+	total /= 3 * sceneConfig.imageWidth * sceneConfig.imageHeight;
 	cerr << "avg: " << total << endl;
 	cerr << "max: " << maxColor << endl;
 
-	cout << "P3\n" << sceneConfiguration.imageWidth << " " << sceneConfiguration.imageHeight << "\n" << maxColor << "\n";
+	cout << "P3\n" << sceneConfig.imageWidth << " " << sceneConfig.imageHeight << "\n" << maxColor << "\n";
 
-	//for (int j = sceneConfiguration.imageHeight - 1; j >= 0; j--) {
-	//	for (int i = 0; i < sceneConfiguration.imageWidth; i++) {
+	//for (int j = sceneConfig.imageHeight - 1; j >= 0; j--) {
+	//	for (int i = 0; i < sceneConfig.imageWidth; i++) {
 	//		Color4f finalColor = framebuffer.getPixel(i, j);
 	//		int ir = int(255.99f * finalColor.r);
 	//		int ig = int(255.99f * finalColor.g);
