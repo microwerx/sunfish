@@ -330,3 +330,6 @@ ASALocalRun/
 .mfractor/
 
 desktop.ini
+
+*.exr
+*.ppm
