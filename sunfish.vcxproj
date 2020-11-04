@@ -41,11 +41,11 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir)include;$(SolutionDir)hatchetfish\include;$(SolutionDir)fluxions-gte\include;$(SolutionDir)fluxions\include</IncludePath>
+    <IncludePath>$(SolutionDir)hatchetfish\include;$(SolutionDir)fluxions-gte\include;$(SolutionDir)starfish\include;$(SolutionDir)fluxions-base\include;$(SolutionDir)fluxions\include;$(IncludePath)</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(OutDir)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir)include;$(SolutionDir)hatchetfish\include;$(SolutionDir)fluxions-gte\include;$(SolutionDir)fluxions\include</IncludePath>
+    <IncludePath>$(SolutionDir)hatchetfish\include;$(SolutionDir)fluxions-gte\include;$(SolutionDir)starfish\include;$(SolutionDir)fluxions-base\include;$(SolutionDir)fluxions\include;$(IncludePath)</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(OutDir)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

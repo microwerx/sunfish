@@ -7,3 +7,12 @@
 [submodule "fluxions"]
 	path = fluxions
 	url = https://github.com/microwerx/fluxions
+[submodule "starfish"]
+	path = starfish
+	url = https://github.com/microwerx/starfish
+[submodule "fluxions-base"]
+	path = fluxions-base
+	url = https://github.com/microwerx/fluxions-base
+[submodule "damselfish"]
+	path = damselfish
+	url = https://github.com/microwerx/damselfish

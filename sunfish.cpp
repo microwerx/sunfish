@@ -42,6 +42,7 @@
 #include <thread>
 #include <future>
 #include <mutex>
+#include <iostream>
 #include <fluxions_stdcxx.hpp>
 #include <fluxions_gte.hpp>
 #include <fluxions_gte_image.hpp>
@@ -50,9 +51,13 @@
 #include <fluxions_ssg.hpp>
 //#include <viperfish_utilities.hpp>
 
-#pragma comment(lib, "hatchetfish.lib")
-#pragma comment(lib, "fluxions-gte.lib")
-#pragma comment(lib, "fluxions.lib")
+#pragma comment(lib, "opengl32.lib")
+#pragma comment(lib, "damselfish.lib")		// used by fluxions for the rendering system
+#pragma comment(lib, "hatchetfish.lib")		// used by all for debug messages
+#pragma comment(lib, "starfish.lib")		// used for astronomy calculations
+#pragma comment(lib, "fluxions-gte.lib")	// used by all for math calculations
+#pragma comment(lib, "fluxions-base.lib")	// used for image loading and opengl drawing
+#pragma comment(lib, "fluxions.lib")		// used for simplescenegraph and rendering
 
 using namespace std;
 using namespace Fluxions;
@@ -646,8 +651,8 @@ Vector3f Material::shadeShirleySky(const Rayf& r, const SimpleEnvironment& envir
 
 
 Vector3f Material::shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment) {
-	Color4f color = environment.pbsky.generatedSunCubeMap.getPixelCubeMap(r.direction.x, max(0.0f, r.direction.y), r.direction.z);
-	return Vector3f(color.r, color.g, color.b);
+	Color4f color = environment.getPixelCubeMap({ r.direction.x, max(0.0f, r.direction.y), r.direction.z });
+	return color.ToVector3();
 	//// no hits, so return background color
 	//Vector3f unit_direction = r.direction.norm();
 	//float t = 0.5f * unit_direction.y + 1.0f;
@@ -1325,27 +1330,30 @@ void Sunfish::makeDefaultScene_() {
 	auto start = std::chrono::steady_clock::now();
 
 	Hf::StopWatch stopwatch;
-	pathTracerScene.ssg.environment.pbsky.SetGroundAlbedo(0.1f, 0.1f, 0.1f);
-	pathTracerScene.ssg.environment.pbsky.SetLocalDate(1, 5, 2016, true, -4);
-	pathTracerScene.ssg.environment.pbsky.SetLocalTime(10, 0, 0, 0.0f);
-	pathTracerScene.ssg.environment.pbsky.SetLocation(27.907360f, -82.324440f);
-	pathTracerScene.ssg.environment.pbsky.SetTurbidity(sceneConfig.sun_turbidity);
-	pathTracerScene.ssg.environment.pbsky.SetNumSamples(1);
-	pathTracerScene.ssg.environment.pbsky.computeAstroFromLocale();
-	pathTracerScene.ssg.environment.pbsky.ComputeCubeMap(256, false, 8.0f, true);
-	pathTracerScene.ssg.environment.pbsky.ComputeCylinderMap(512, 128);
+	pathTracerScene.ssg.environment.setGroundAlbedo({ 0.1f, 0.1f, 0.1f });
+	Sf::PA::CivilDateTime dtg = {
+		1, 5, 2016, true, -4,
+		10,0,0,0.0f,
+		27.907360f, -82.324440f };
+	pathTracerScene.ssg.environment.setCivilDateTime(dtg);
+	pathTracerScene.ssg.environment.setTurbidity(sceneConfig.sun_turbidity);
+	pathTracerScene.ssg.environment.setNumSamples(1);
+	pathTracerScene.ssg.environment.computeAstroFromLocale();
+	pathTracerScene.ssg.environment.computePBSky();
+	//pathTracerScene.ssg.environment.ComputeCubeMap(256, false, 8.0f, true);
+	//pathTracerScene.ssg.environment.ComputeCylinderMap(512, 128);
 	stopwatch.Stop();
 	auto end = std::chrono::steady_clock::now();
 	auto diff = end - start;
 	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
 
-	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_0.ppm", 0);
-	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_1.ppm", 1);
-	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_2.ppm", 2);
-	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_3.ppm", 3);
-	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_4.ppm", 4);
-	pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_5.ppm", 5);
-	pathTracerScene.ssg.environment.pbsky.generatedSunCylMap.savePPM("pbsky_cylmap.ppm");
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_0.ppm", 0);
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_1.ppm", 1);
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_2.ppm", 2);
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_3.ppm", 3);
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_4.ppm", 4);
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_5.ppm", 5);
+	//pathTracerScene.ssg.environment.pbsky.generatedSunCylMap.savePPM("pbsky_cylmap.ppm");
 
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Vector3f(0.8f, 0.1f, 0.1f), 0.05f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Vector3f(0.1f, 0.2f, 0.5f))));
@@ -1383,7 +1391,7 @@ void Sunfish::renderStart() {
 	time_t t0, t1, dt;
 
 	t0 = time(NULL);
-	framebuffer = Image4f{ sceneConfig.imageWidth, sceneConfig.imageHeight, 1 };
+	framebuffer = Image4f{ (int)sceneConfig.imageWidth, (int)sceneConfig.imageHeight, 1 };
 
 	makeDefaultScene_();
 
