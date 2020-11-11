@@ -1251,7 +1251,7 @@ struct SunfishSample {
 	double sampleCount = 0.0;
 
 	// addSample(s) advances the current slot to place an output
-	size_t addSample(const Vector3f s) {
+	void addSample(const Vector3f s) {
 		outputs[output_i] = s;
 		output += s;
 		sampleCount += 1.0;
@@ -1291,11 +1291,54 @@ struct SunfishSample {
 int sfPathTraceWorker(WorkerContext* wc);
 
 // sfRayGenShader(u, v, wc) calculates an initial ray using (u,v) as 2D coordinates in a window
-Rayf sfRayGenShader(float u, float v, WorkerContext* wc) {
-	return wc->scene->camera.getRayDOF(u, v);
+Rayf sfRayGenShader(Scene* scene, float u, float v);
+
+Vector3f sfTraceRecursive(Scene* scene, Rayf r, unsigned depth = 0);
+Vector3f sfTraceIterative(Scene* scene, Rayf r, size_t maxRayDepth = 25);
+
+
+Rayf sfRayGenShader(Scene* scene, float u, float v) {
+	return scene->camera.getRayDOF(u, v);
 }
 
+
+Vector3f sfTraceRecursive(Scene* scene, Rayf r, unsigned depth) {
+	static NormalShadeMaterial defaultMaterial;
+	HitRecord rec;
+
+	if (scene->world.closestHit(r, 0.001f, FLT_MAX, rec)) {
+		Rayf scatteredRay;
+		Vector3f attenuation;
+		if (depth < 50 && rec.pmaterial->scatter(r, rec, attenuation, scatteredRay)) {
+			return attenuation * sfTraceRecursive(scene, scatteredRay, depth + 1);
+		}
+		else {
+			return Fx::Black;
+		}
+	}
+	else {
+		return sfShadeSkyShirley(r);
+	}
+}
+
+
+Vector3f sfTraceIterative(Scene* scene, Rayf r, size_t maxRayDepth) {
+	static NormalShadeMaterial defaultMaterial;
+	HitRecord rec;
+	for (size_t it = 0; it < maxRayDepth; it++) {
+		if (scene->world.closestHit(r, 0.001f, FLT_MAX, rec)) {
+			return defaultMaterial.shadeClosestHit(r, rec);
+		}
+		else {
+			return sfShadeSkyDawn(r);
+		}
+	}
+	return Fx::Black;
+}
+
+
 mutex framebuffer_mutex;
+
 
 int sfPathTraceWorker(WorkerContext* wc) {
 	if (wc == nullptr || wc->scene == nullptr || wc->sceneConfig == nullptr || wc->framebuffer == nullptr) {
@@ -1328,7 +1371,9 @@ int sfPathTraceWorker(WorkerContext* wc) {
 				float u = float(i + ujitter[s]) / (float)wc->sceneConfig->imageWidth;
 				float v = float(j + vjitter[s]) / (float)wc->sceneConfig->imageHeight;
 
-				sample.addSample(wc->scene->trace(sfRayGenShader(u, v, wc), 0));
+				//sample.addSample(wc->scene->trace(sfRayGenShader(u, v, wc), 0));
+				//sample.addSample(sfTraceRecursive(wc->scene, sfRayGenShader(wc->scene, u, v)));
+				sample.addSample(sfTraceIterative(wc->scene, sfRayGenShader(wc->scene, u, v)));
 			}
 			sample.finalize();
 
