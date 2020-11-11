@@ -49,6 +49,7 @@
 #include <hatchetfish.hpp>
 #include <fluxions_ssg_environment.hpp>
 #include <fluxions_ssg.hpp>
+#include <fluxions_gte_colors.hpp>
 //#include <viperfish_utilities.hpp>
 
 #pragma comment(lib, "opengl32.lib")
@@ -220,6 +221,37 @@ float schlick(float cosine, float F_0) {
 	float r0 = (1.0f - F_0) / (1.0f + F_0);
 	r0 = r0 * r0;
 	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+// Sky Shader Helpers ////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+// ShadeDaySky(Rayf& r, SimpleEnvironment& env);
+// ShadeSunsetSky(Rayf& r, SimpleEnvironment& env);
+// ShadeHosekWilkieSky(Rayf& r, SimpleEnvironment& env);
+//////////////////////////////////////////////////////////////////////
+
+
+Vector3f ShadeShirleySky(const Rayf& r, const SimpleEnvironment& environment) {
+	// no hits, so return background color
+	Vector3f unit_direction = r.direction.unit();
+	float t = 0.5f * unit_direction.y + 1.0f;
+	return (1.0f - t) * Fx::White + t * Fx::ArneSkyBlue;
+}
+
+
+Vector3f ShadeSunsetSky(const Rayf& r, const SimpleEnvironment& environment) {
+	// no hits, so return background color
+	Vector3f unit_direction = r.direction.unit();
+	float t = 0.5f * unit_direction.y + 1.0f;
+	return (1.0f - t) * Fx::Orange + t * Fx::ArneSkyBlue;
+}
+
+
+Vector3f ShadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment) {
+	Color4f color = environment.getPixelCubeMap({ r.direction.x, max(0.0f, r.direction.y), r.direction.z });
+	return color.ToVector3();
 }
 
 
@@ -616,9 +648,6 @@ public:
 	virtual Vector3f shadeMissedHit(const Rayf& r, const SimpleEnvironment& environment);
 
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
-
-	Vector3f shadeShirleySky(const Rayf& r, const SimpleEnvironment& environment);
-	Vector3f shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment);
 };
 
 
@@ -633,30 +662,12 @@ Vector3f Material::shadeAnyHit(const Rayf& r, const HitRecord& rec) {
 
 
 Vector3f Material::shadeMissedHit(const Rayf& r, const SimpleEnvironment& environment) {
-	return shadeHosekWilkieSky(r, environment);
+	return ShadeHosekWilkieSky(r, environment);
 }
 
 
 bool Material::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const {
 	return true;
-}
-
-
-Vector3f Material::shadeShirleySky(const Rayf& r, const SimpleEnvironment& environment) {
-	// no hits, so return background color
-	Vector3f unit_direction = r.direction.unit();
-	float t = 0.5f * unit_direction.y + 1.0f;
-	return (1.0f - t) * Vector3f(1.0f, 1.0f, 1.0f) + t * Vector3f(0.5f, 0.7f, 1.0f);
-}
-
-
-Vector3f Material::shadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment) {
-	Color4f color = environment.getPixelCubeMap({ r.direction.x, max(0.0f, r.direction.y), r.direction.z });
-	return color.ToVector3();
-	//// no hits, so return background color
-	//Vector3f unit_direction = r.direction.norm();
-	//float t = 0.5f * unit_direction.y + 1.0f;
-	//return (1.0f - t)*Vector3f(1.0f, 1.0f, 1.0f) + t*Vector3f(0.5f, 0.7f, 1.0f);
 }
 
 
@@ -674,6 +685,7 @@ public:
 
 	Vector3f albedo;
 };
+
 
 bool LambertianMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const {
 	Vector3f scatterDir = rec.p + rec.normal + getRandomUnitSphereVector();
@@ -693,7 +705,7 @@ bool LambertianMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector
 
 class MetalMaterial : public Material {
 public:
-	MetalMaterial(Vector3f color, float f) : albedo(color) { fuzz = min(1.0f, f); }
+	MetalMaterial(Vector3f color, float f) : albedo(color) { fuzz = std::min(1.0f, f); }
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
 
 	Vector3f albedo;
