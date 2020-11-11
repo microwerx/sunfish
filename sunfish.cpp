@@ -77,9 +77,11 @@ public:
 	void init(int size);
 	void seed(int seed);
 
-	float frand();
+	float frand() { return _frand(0.0f, 1.0f); }
 	double drand();
 	int irand();
+
+	float lufrand();
 
 	int size;
 	int curIndex;
@@ -123,7 +125,7 @@ void RandomLUT::init(int size) {
 }
 
 
-float RandomLUT::frand() {
+float RandomLUT::lufrand() {
 	curIndex = (curIndex + 1);
 	if (curIndex >= size) curIndex = 0;
 	return frandom[curIndex];
@@ -648,6 +650,8 @@ public:
 	virtual Vector3f shadeMissedHit(const Rayf& r, const SimpleEnvironment& environment);
 
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
+
+	virtual Vector3f L_e() const { return Fx::Black; }
 };
 
 
@@ -671,6 +675,20 @@ bool Material::scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenu
 }
 
 
+class LightMaterial : public Material {
+public:
+	LightMaterial(Vector3f color) : emissiveColor(color) {}
+
+	bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const override {
+		return false;
+	}
+
+	Vector3f L_e() const override { return emissiveColor; }
+
+	Vector3f emissiveColor{ Fx::Yellow };
+};
+
+
 //////////////////////////////////////////////////////////////////////
 // LambertianMaterial ////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
@@ -683,6 +701,8 @@ public:
 	LambertianMaterial(Vector3f color) : albedo(color) {}
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
 
+	Vector3f shadeClosestHit(const Rayf& r, const HitRecord& rec) override;
+
 	Vector3f albedo;
 };
 
@@ -692,6 +712,11 @@ bool LambertianMaterial::scatter(const Rayf& rayIn, const HitRecord& rec, Vector
 	scatteredRay = Rayf(rec.p, scatterDir - rec.p);
 	attenuation = albedo;
 	return true;
+}
+
+
+Vector3f LambertianMaterial::shadeClosestHit(const Rayf& r, const HitRecord& rec) {
+	return albedo * FX_F32_1_PI;
 }
 
 
@@ -707,6 +732,10 @@ class MetalMaterial : public Material {
 public:
 	MetalMaterial(Vector3f color, float f) : albedo(color) { fuzz = std::min(1.0f, f); }
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
+
+	Vector3f shadeClosestHit(const Rayf& r, const HitRecord& rec) override {
+		return albedo;
+	}
 
 	Vector3f albedo;
 	float fuzz;
@@ -736,6 +765,10 @@ public:
 	DielectricMaterial(float f) : F_0(f) {}
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
 	float F_0;
+
+	Vector3f shadeClosestHit(const Rayf& r, const HitRecord& rec) override {
+		return { 1.0f,1.0f,1.0f };
+	}
 };
 
 
@@ -1026,7 +1059,7 @@ SunfishConfig::SunfishConfig(int argc, const char** argv) {
 	workgroupSizeY = 128;
 	workgroupSizeZ = 128;
 	raysPerPixel = 1;
-	samplesPerPixel = 1;
+	samplesPerPixel = 10;
 	jitterRadius = 1.0f;
 	rayDepth = 16;
 
@@ -1324,16 +1357,38 @@ Vector3f sfTraceRecursive(Scene* scene, Rayf r, unsigned depth) {
 
 Vector3f sfTraceIterative(Scene* scene, Rayf r, size_t maxRayDepth) {
 	static NormalShadeMaterial defaultMaterial;
-	HitRecord rec;
-	for (size_t it = 0; it < maxRayDepth; it++) {
-		if (scene->world.closestHit(r, 0.001f, FLT_MAX, rec)) {
-			return defaultMaterial.shadeClosestHit(r, rec);
+	constexpr size_t N = SunfishSample::MaxRayDepth;
+	//HitRecord rec[N];
+	//Vector3f attenuation[N];
+	Vector3f L_i;
+	Vector3f f_r[N];
+	float NdotL[N];
+	size_t it{ 0 };
+	for (; it < maxRayDepth; it++) {
+		Rayf scatteredRay;
+		HitRecord hitRecord;
+		Vector3f attenuation;
+		if (scene->world.closestHit(r, 0.001f, FLT_MAX, hitRecord)) {
+			if (!hitRecord.pmaterial->scatter(r, hitRecord, attenuation, scatteredRay)) {
+				L_i = hitRecord.pmaterial->L_e();
+				break;
+			}
+			f_r[it] = hitRecord.pmaterial->shadeClosestHit(r, hitRecord);
+			NdotL[it] = max(0.0f, dot(hitRecord.normal, scatteredRay.direction));
 		}
 		else {
-			return sfShadeSkyDawn(r);
+			L_i = sfShadeSkyDawn(r);
+			break;
 		}
+		r = scatteredRay;
 	}
-	return Fx::Black;
+
+	// Last L_i is source of light
+	// First L_i is the final calculation
+	for (size_t i = it; i > 0; i--) {
+		L_i = f_r[i - 1] * L_i * NdotL[i - 1];
+	}
+	return L_i;
 }
 
 
@@ -1355,10 +1410,10 @@ int sfPathTraceWorker(WorkerContext* wc) {
 	float ujitter[MaxJitter];
 	float vjitter[MaxJitter];
 	for (auto& u : ujitter) {
-		u = RTrandom.frand() * wc->sceneConfig->jitterRadius;
+		u = RTrandom.lufrand() * wc->sceneConfig->jitterRadius;
 	}
 	for (auto& v : vjitter) {
-		v = RTrandom.frand() * wc->sceneConfig->jitterRadius;
+		v = RTrandom.lufrand() * wc->sceneConfig->jitterRadius;
 	}
 
 	// For every pixel
@@ -1380,7 +1435,7 @@ int sfPathTraceWorker(WorkerContext* wc) {
 			// Framebuffer is write only, so mutex not really needed
 			// But if reading and writing was conditional, then mutex would be needed.
 			// lock_guard<mutex> guard(framebuffer_mutex);
-			wc->framebuffer->setPixel(i, j, sample.gammaCorrect());
+			wc->framebuffer->setPixel(i, j, sample.gammaCorrect(0.0f, 1.0f));
 		}
 	}
 	return 0;
@@ -1455,6 +1510,7 @@ void Sunfish::makeDefaultScene_() {
 	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -100.5f, -1.0f), 100.0f, new LambertianMaterial(Vector3f(0.8f, 0.8f, 0.0f))));
 	world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Vector3f(0.8f, 0.6f, 0.2f), 0.0f)));
 	world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
+	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 3.0f, 0.0f), 0.10f, new LightMaterial({ 1.0f,1.0f,1.0f })));
 
 	pathTracerScene.camera.lensRadius = 0.0f;// 0.1f;
 	pathTracerScene.camera.setProjection(45.0f, sceneConfig.imageAspect, 0.001f, 100.0f);
@@ -1493,6 +1549,7 @@ void Sunfish::makeDefaultScene_() {
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -10000.5f, -1.0f), 10000.0f, new LambertianMaterial(Vector3f(0.8f, 0.8f, 0.0f))));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Vector3f(0.8f, 0.6f, 0.2f), 0.0f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, 0.0f), 0.10f, new LightMaterial({ 100.0f,100.0f,100.0f })));
 
 	if (0) {
 		for (int curObj = 0; curObj < 100; curObj++) {
@@ -1531,7 +1588,7 @@ void Sunfish::renderStart() {
 
 	startTime = std::chrono::steady_clock::now();
 
-	constexpr bool use_multithreading = true;
+	constexpr bool use_multithreading = false;
 	if (use_multithreading) {
 		for (int i = 0; i < sceneConfig.imageWidth; i += sceneConfig.workgroupSizeX) {
 			for (int j = 0; j < sceneConfig.imageHeight; j += sceneConfig.workgroupSizeY) {
