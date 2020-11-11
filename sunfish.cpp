@@ -227,13 +227,13 @@ float schlick(float cosine, float F_0) {
 //////////////////////////////////////////////////////////////////////
 // Sky Shader Helpers ////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
-// ShadeDaySky(Rayf& r, SimpleEnvironment& env);
-// ShadeSunsetSky(Rayf& r, SimpleEnvironment& env);
-// ShadeHosekWilkieSky(Rayf& r, SimpleEnvironment& env);
+// sfShadeSkyShirley(Rayf& r, SimpleEnvironment& env);
+// sfShadeSkyDawn(Rayf& r, SimpleEnvironment& env);
+// sfShadeSkyPhysical(Rayf& r, SimpleEnvironment& env);
 //////////////////////////////////////////////////////////////////////
 
 
-Vector3f ShadeShirleySky(const Rayf& r, const SimpleEnvironment& environment) {
+Vector3f sfShadeSkyShirley(const Rayf& r) {
 	// no hits, so return background color
 	Vector3f unit_direction = r.direction.unit();
 	float t = 0.5f * unit_direction.y + 1.0f;
@@ -241,7 +241,7 @@ Vector3f ShadeShirleySky(const Rayf& r, const SimpleEnvironment& environment) {
 }
 
 
-Vector3f ShadeSunsetSky(const Rayf& r, const SimpleEnvironment& environment) {
+Vector3f sfShadeSkyDawn(const Rayf& r) {
 	// no hits, so return background color
 	Vector3f unit_direction = r.direction.unit();
 	float t = 0.5f * unit_direction.y + 1.0f;
@@ -249,7 +249,7 @@ Vector3f ShadeSunsetSky(const Rayf& r, const SimpleEnvironment& environment) {
 }
 
 
-Vector3f ShadeHosekWilkieSky(const Rayf& r, const SimpleEnvironment& environment) {
+Vector3f sfShadeSkyPhysical(const Rayf& r, const SimpleEnvironment& environment) {
 	Color4f color = environment.getPixelCubeMap({ r.direction.x, max(0.0f, r.direction.y), r.direction.z });
 	return color.ToVector3();
 }
@@ -662,7 +662,7 @@ Vector3f Material::shadeAnyHit(const Rayf& r, const HitRecord& rec) {
 
 
 Vector3f Material::shadeMissedHit(const Rayf& r, const SimpleEnvironment& environment) {
-	return ShadeHosekWilkieSky(r, environment);
+	return sfShadeSkyDawn(r);
 }
 
 
@@ -923,16 +923,16 @@ void Scene::render() {
 
 
 //////////////////////////////////////////////////////////////////////
-// SceneConfiguration ////////////////////////////////////////////////
+// SunfishConfig /////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
-// SceneConfiguration stores the configuration of the path tracer.
+// SunfishConfig stores the configuration of the path tracer.
 // Perhaps this would be better if we renamed it SunfishConfig instead.
 //////////////////////////////////////////////////////////////////////
 
-class SceneConfiguration {
+class SunfishConfig {
 public:
-	SceneConfiguration(int argc, const char** argv);
-	~SceneConfiguration();
+	SunfishConfig(int argc, const char** argv);
+	~SunfishConfig();
 
 	void printHelp();
 
@@ -965,7 +965,7 @@ private:
 };
 
 
-bool SceneConfiguration::getParameterf(int argc, const char** argv, int* i, const string& parameter, float* value) {
+bool SunfishConfig::getParameterf(int argc, const char** argv, int* i, const string& parameter, float* value) {
 	if (*i < 0 || *i >= argc) return false;
 
 	if (parameter == argv[*i]) {
@@ -980,7 +980,7 @@ bool SceneConfiguration::getParameterf(int argc, const char** argv, int* i, cons
 }
 
 
-int SceneConfiguration::getParameteri(int argc, const char** argv, int* i, const string& parameter) {
+int SunfishConfig::getParameteri(int argc, const char** argv, int* i, const string& parameter) {
 	if (*i < 0 || *i >= argc) return 0;
 
 	int value{ 0 };
@@ -996,7 +996,7 @@ int SceneConfiguration::getParameteri(int argc, const char** argv, int* i, const
 }
 
 
-string SceneConfiguration::getParameters(int argc, const char** argv, int* i, const string& parameter) {
+string SunfishConfig::getParameters(int argc, const char** argv, int* i, const string& parameter) {
 	if (*i < 0 || *i >= argc) return string();
 
 	string value{ "" };
@@ -1011,7 +1011,7 @@ string SceneConfiguration::getParameters(int argc, const char** argv, int* i, co
 }
 
 
-SceneConfiguration::SceneConfiguration(int argc, const char** argv) {
+SunfishConfig::SunfishConfig(int argc, const char** argv) {
 	imageWidth = 1280;
 	imageHeight = 720;
 	isServer = true;
@@ -1170,12 +1170,12 @@ SceneConfiguration::SceneConfiguration(int argc, const char** argv) {
 }
 
 
-SceneConfiguration::~SceneConfiguration() {
+SunfishConfig::~SunfishConfig() {
 
 }
 
 
-void SceneConfiguration::printHelp() {
+void SunfishConfig::printHelp() {
 	cerr << "Sunfish" << endl;
 	cerr << "Physically Based Monte Carlo Path Tracer" << endl;
 	cerr << "========================================" << endl;
@@ -1225,50 +1225,117 @@ struct WorkerContext {
 	int top{ 0 };
 	Scene* scene{ nullptr };
 	Image4f* framebuffer{ nullptr };
-	SceneConfiguration* sceneConfig{ nullptr };
+	SunfishConfig* sceneConfig{ nullptr };
 };
 
+struct SunfishSample {
+	static constexpr size_t MaxRayDepth = 25;
+	static constexpr size_t MaxSamples = 32;
 
-int pathTraceWorker(WorkerContext* wc);
+	// i is the current event along the path
+	size_t i{ 0 };
 
+	// This is the current path in path space
+	HitRecord x[MaxRayDepth];
+
+	// TODO: We have already done this before--move this out of here using a GTE class
+	// This is a running total of the samples taken. This is used for variance calculations
+	size_t output_i{ 0 };
+	Vector3f outputs[MaxSamples];
+	double x_i[MaxSamples]{ 0.0 };
+	double sigma2{ 0 };
+	double mu{ 0 };
+
+	// output represents the average of the samples taken on this sample
+	Vector3f output{ 0.0f };
+	double sampleCount = 0.0;
+
+	// addSample(s) advances the current slot to place an output
+	size_t addSample(const Vector3f s) {
+		outputs[output_i] = s;
+		output += s;
+		sampleCount += 1.0;
+		output_i = (output_i + 1) % MaxSamples;
+	}
+
+	// finalize() computes the output color
+	void finalize() {
+		output /= sampleCount;
+	}
+
+	// Calculate variance of sample
+	void computeVariance() {
+		size_t count = std::min<size_t>(MaxSamples, sampleCount);
+		for (size_t i = 0; i < count; i++) {
+			x_i[i] = (double)outputs[i].x + outputs[i].y + outputs[i].z;
+			mu += x_i[i];
+		}
+		mu /= (double)count;
+		for (size_t i = 0; i < count; i++) {
+			sigma2 += x_i[i] - mu;
+		}
+		sigma2 /= (double)count;
+	}
+
+	// gammaCorrect(e, g) adjusts the image for exposure and gamma correction
+	// @returns powf(powf(2.0f, e) * output, g)
+	Color4f gammaCorrect(float e = 0.0f, float g = 2.4f) const {
+		float exposure = powf(2.0f, e);
+		return {
+			pow(exposure * output.x, g),
+			pow(exposure * output.y, g),
+			pow(exposure * output.z, g), 1.0f };
+	}
+};
+
+int sfPathTraceWorker(WorkerContext* wc);
+
+// sfRayGenShader(u, v, wc) calculates an initial ray using (u,v) as 2D coordinates in a window
+Rayf sfRayGenShader(float u, float v, WorkerContext* wc) {
+	return wc->scene->camera.getRayDOF(u, v);
+}
 
 mutex framebuffer_mutex;
 
-
-int pathTraceWorker(WorkerContext* wc) {
+int sfPathTraceWorker(WorkerContext* wc) {
 	if (wc == nullptr || wc->scene == nullptr || wc->sceneConfig == nullptr || wc->framebuffer == nullptr) {
 		cerr << "blah!";
 		return -1;
 	}
 
-	Image4f tmpImage(wc->right - wc->left, wc->bottom - wc->top);
+	// TODO: Should we create mini-textures and then draw these to an OpenGL window?
+	//Image4f tmpImage(wc->right - wc->left, wc->bottom - wc->top);
 
+	// TODO: Change this into a GTE class
+	// This is a predetermined jitter map for sampling around the ray
+	constexpr size_t MaxJitter = 1024;
+	float ujitter[MaxJitter];
+	float vjitter[MaxJitter];
+	for (auto& u : ujitter) {
+		u = RTrandom.frand() * wc->sceneConfig->jitterRadius;
+	}
+	for (auto& v : vjitter) {
+		v = RTrandom.frand() * wc->sceneConfig->jitterRadius;
+	}
+
+	// For every pixel
 	for (int i = wc->left; i <= wc->right; i++) {
 		for (int j = wc->top; j <= wc->bottom; j++) {
-			Vector3f output(0.0f, 0.0f, 0.0f);
+			// TODO: change this so this can be an interable step
+
+			SunfishSample sample;
 			for (int s = 0; s < wc->sceneConfig->samplesPerPixel; s++) {
-				float u = float(i + RTrandom.frand() * wc->sceneConfig->jitterRadius) / (float)wc->sceneConfig->imageWidth;
-				float v = float(j + RTrandom.frand() * wc->sceneConfig->jitterRadius) / (float)wc->sceneConfig->imageHeight;
+				float u = float(i + ujitter[s]) / (float)wc->sceneConfig->imageWidth;
+				float v = float(j + vjitter[s]) / (float)wc->sceneConfig->imageHeight;
 
-				Rayf r = wc->scene->camera.getRayDOF(u, v);
-				Vector3f p = r.getPointAtParameter(2.0f);
-				output += wc->scene->trace(r, 0);
-				//output += Trace(r, wc->scene->world, 0, wc->scene->environment);
+				sample.addSample(wc->scene->trace(sfRayGenShader(u, v, wc), 0));
 			}
-
-			// Post processing step...
-			output /= wc->sceneConfig->samplesPerPixel;
-
-			// TODO: change this to a programmable stage
-
-			// gamma correct image
-
-			Color4f gammaCorrectedColor{ sqrt(output.x), sqrt(output.y), sqrt(output.z), 1.0f };
+			sample.finalize();
 
 			// Framebuffer is write only, so mutex not really needed
 			// But if reading and writing was conditional, then mutex would be needed.
 			// lock_guard<mutex> guard(framebuffer_mutex);
-			wc->framebuffer->setPixel(i, j, gammaCorrectedColor);
+			wc->framebuffer->setPixel(i, j, sample.gammaCorrect());
 		}
 	}
 	return 0;
@@ -1298,16 +1365,25 @@ public:
 
 	void loadScene();
 	void renderStart();
+	// renderStep() returns true if we should keep iterating
 	bool renderStep();
 	void renderStop();
 	void render(unsigned numIterations);
 	void saveImage();
 private:
-	SceneConfiguration sceneConfig;
+	SunfishConfig sceneConfig;
 	RtoList world;
 	NormalShadeMaterial normalShader;
 	Scene pathTracerScene;
 	Image4f framebuffer;
+
+	// Asynchronous data
+	vector<WorkerContext> wcs;
+	vector<future<int>> futures;
+
+	// Statistics
+	std::chrono::steady_clock::time_point startTime;
+	std::chrono::steady_clock::time_point endTime;
 
 	void makeDefaultScene_();
 };
@@ -1393,7 +1469,8 @@ void Sunfish::makeDefaultScene_() {
 void Sunfish::render(unsigned numIterations) {
 	renderStart();
 	for (auto i = 0U; i < numIterations; i++) {
-		renderStep();
+		if (renderStep())
+			break;
 	}
 	renderStop();
 }
@@ -1407,25 +1484,10 @@ void Sunfish::renderStart() {
 
 	makeDefaultScene_();
 
-	auto start = std::chrono::steady_clock::now();
+	startTime = std::chrono::steady_clock::now();
 
-	if (0) {
-		WorkerContext wc;
-
-		wc.left = 0;
-		wc.right = sceneConfig.imageWidth - 1;
-		wc.top = 0;
-		wc.bottom = sceneConfig.imageHeight - 1;
-		wc.framebuffer = &framebuffer;
-		wc.scene = &pathTracerScene;
-		wc.sceneConfig = &sceneConfig;
-
-		pathTraceWorker(&wc);
-	}
-	else {
-		vector<WorkerContext> wcs;
-		vector<future<int>> futures;
-
+	constexpr bool use_multithreading = true;
+	if (use_multithreading) {
 		for (int i = 0; i < sceneConfig.imageWidth; i += sceneConfig.workgroupSizeX) {
 			for (int j = 0; j < sceneConfig.imageHeight; j += sceneConfig.workgroupSizeY) {
 				WorkerContext wc;
@@ -1444,91 +1506,76 @@ void Sunfish::renderStart() {
 
 		for (auto wc = wcs.begin(); wc != wcs.end(); wc++) {
 			WorkerContext* pwc = &(*wc);
-			futures.push_back(async(pathTraceWorker, pwc));
+			futures.push_back(async(sfPathTraceWorker, pwc));
 		}
-
-		int i = 0;
-		for (auto& f : futures) {
-			int result = f.get();
-			i++;
-			cerr << i << " " << flush;
-		}
-		cerr << endl;
 	}
+	else {
+		WorkerContext wc;
 
-	auto end = std::chrono::steady_clock::now();
-	auto diff = end - start;
-	std::cerr << std::chrono::duration <double, std::milli>(diff).count() << " ms" << std::endl;
+		wc.left = 0;
+		wc.right = sceneConfig.imageWidth - 1;
+		wc.top = 0;
+		wc.bottom = sceneConfig.imageHeight - 1;
+		wc.framebuffer = &framebuffer;
+		wc.scene = &pathTracerScene;
+		wc.sceneConfig = &sceneConfig;
 
-
-	//const int maxSamples = sceneConfig.samplesPerPixel;
-	//const float invSampleScale = 1.0f / maxSamples;
-
-	//for (int j = ny - 1; j >= 0; j--)
-	//{
-	//	for (int i = 0; i < nx; i++)
-	//	{
-	//		Vector3f finalColor(0.0f, 0.0f, 0.0f);
-	//		for (int s = 0; s < maxSamples; s++)
-	//		{
-	//			float u = float(i + RTrandom.frand()*sceneConfig.jitterRadius) / float(nx);
-	//			float v = float(j + RTrandom.frand()*sceneConfig.jitterRadius) / float(ny);
-
-	//			Rayf r = pathTracerScene.camera.getRayDOF(u, v);
-	//			Vector3f p = r.getPointAtParameter(2.0f);
-	//			finalColor += Trace(r, world, 0);
-	//		}
-
-	//		// Post processing step...
-	//		finalColor *= invSampleScale;
-
-	//		// gamma correct image
-	//		//finalColor = Vector3f(sqrt(finalColor.r), sqrt(finalColor.g), sqrt(finalColor.b));
-	//		
-	//		Color4f gammaCorrectedColor = Color4f(sqrt(finalColor.r), sqrt(finalColor.g), sqrt(finalColor.b), 1.0f);
-	//		framebuffer.setPixel(i, j, gammaCorrectedColor);
-
-	//		//int ir = int(255.99f*finalColor.r);
-	//		//int ig = int(255.99f*finalColor.g);
-	//		//int ib = int(255.99f*finalColor.b);
-
-	//		//cout << ir << " " << ig << " " << ib << "\n";
-	//	}
-	//	//cout << flush;
-	//}
+		sfPathTraceWorker(&wc);
+	}
 
 	t1 = time(NULL);
 	dt = t1 - t0;
-	cerr << "Total time: " << dt << endl;
+	cerr << "Total start time: " << dt << endl;
 }
 
 
 bool Sunfish::renderStep() {
+	size_t i = 0;
+	std::chrono::milliseconds span(0);
+	for (auto& f : futures) {
+		if (!f.valid())
+			i++;
+		else if (f.wait_for(span) == std::future_status::ready) {
+			i++;
+			std::cerr << ".";
+		}
+	}
+	if (i == futures.size())
+		return false;
 	return true;
 }
 
 
 void Sunfish::renderStop() {
+	// Wait for threads to stop
+	int i = 0;
+	for (auto& f : futures) {
+		int result = f.get();
+		i++;
+	}
+
+	// Print out length of time
+	endTime = std::chrono::steady_clock::now();
+	auto diff = endTime - startTime;
+	std::cerr << "Total render time: " << std::chrono::duration <double, std::milli>(diff).count() << " ms" << std::endl;
+
+	// Write out framebuffer to disk
 	lock_guard<mutex> guard(framebuffer_mutex);
 
-	int maxColor = 0;
-	long long int total = 0;
+	double maxColor = 0;
+	double total = 0;
 
 	for (int j = sceneConfig.imageHeight - 1; j >= 0; j--) {
 		for (int i = 0; i < sceneConfig.imageWidth; i++) {
 			Color4f finalColor = framebuffer.getPixel(i, j);
-			int ir = int(255.99f * finalColor.r);
-			int ig = int(255.99f * finalColor.g);
-			int ib = int(255.99f * finalColor.b);
-			if (ir > maxColor) maxColor = ir;
-			if (ig > maxColor) maxColor = ig;
-			if (ib > maxColor) maxColor = ib;
 
-			total += (long long)ir + ig + ib;
+			double sum = (double)finalColor.r + finalColor.g + finalColor.b;
+			total += sum;
+			maxColor = std::max(sum, maxColor);
 		}
 	}
 
-	total /= (long long)(3LL * sceneConfig.imageWidth * sceneConfig.imageHeight);
+	total /= (double)(3LL * sceneConfig.imageWidth * sceneConfig.imageHeight);
 	cerr << "avg: " << total << endl;
 	cerr << "max: " << maxColor << endl;
 }
@@ -1568,6 +1615,9 @@ int main(int argc, const char** argv) {
 	sunfish.loadScene();
 	sunfish.render(100);
 	sunfish.saveImage();
+
+	//std::string empty;
+	//std::getline(std::cin, empty);
 
 	return 0;
 }
