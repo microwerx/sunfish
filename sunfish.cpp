@@ -451,6 +451,12 @@ public:
 		return false;
 	}
 
+	// map(p) is used for signed distance functions.
+	// @returns t
+	virtual float map(Vector3f p) const {
+		return 1e10f;
+	}
+
 	string name;
 	Material* material = nullptr;
 };
@@ -600,6 +606,104 @@ bool RtoSphere::closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec
 }
 
 
+//////////////////////////////////////////////////////////////////////
+// RtoBox ////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
+
+template <typename T>
+constexpr float dot2(TVector2<T> a) {
+	return dot(a, a);
+}
+
+
+template <typename T>
+constexpr float dot2(TVector3<T> a) {
+	return dot(a, a);
+}
+
+
+template <typename T>
+constexpr TVector3<T> abs(TVector3<T> a) {
+	return { std::abs(a.x), std::abs(a.y), std::abs(a.z) };
+}
+
+
+template <typename T>
+constexpr TVector3<T> min(TVector3<T> a, TVector3<T> b) {
+	return { std::min<T>(a.x,b.x), std::min<T>(a.y, b.y), std::min<T>(a.z, b.z) };
+}
+
+
+template <typename T>
+constexpr TVector3<T> max(TVector3<T> a, TVector3<T> b) {
+	return { std::max<T>(a.x,b.x), std::max<T>(a.y, b.y), std::max<T>(a.z, b.z) };
+}
+
+
+template <typename T>
+constexpr TVector3<T> max(TVector3<T> a, T b) {
+	return { std::max<T>(a.x, b), std::max<T>(a.y, b), std::max<T>(a.z, b) };
+}
+
+
+template <typename T>
+constexpr float length(TVector3<T> a) {
+	return std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+
+
+static inline float sdfBox(Vector3f p, Vector3f b) {
+	Vector3f q = abs(p) - b;
+	return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f);
+}
+
+
+class RtoBox : public RayTraceObject {
+public:
+	RtoBox(Vector3f b, Vector3f center, Material* pmat) :
+		_box(b), _center(center) {
+		material = pmat;
+	}
+
+	bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+		constexpr int MaxIterations = 32;
+		constexpr float EPSILON = 0.001f;
+		constexpr Vector3f XEPS{ EPSILON, 0.0f, 0.0f };
+		constexpr Vector3f YEPS{ 0.0f, EPSILON, 0.0f };
+		constexpr Vector3f ZEPS{ 0.0f, 0.0f, EPSILON };
+		float t = tMin;
+		for (int i = 0; i < MaxIterations; i++) {
+			Vector3f p = r.getPointAtParameter(t);
+			float d = map(p);
+			if (d > -EPSILON && d < EPSILON) {
+				rec.p = p;
+				rec.t = t;
+				rec.normal = Vector3f(map(p + XEPS) - map(p - XEPS),
+									  map(p + YEPS) - map(p - YEPS),
+									  map(p + ZEPS) - map(p - ZEPS)).unit();
+				rec.pmaterial = material;
+				return true;
+			}
+			t += d;
+			if (t > tMax)
+				return false;
+		}
+		return false;
+	}
+
+
+	// Returns distance to object
+	float map(Vector3f p) const override {
+		return sdfBox(p - _center, _box);
+	}
+
+private:
+	Vector3f _box{ 0.5f };
+	Vector3f _center{ 0.0f };
+};
+
+
 //float hit_sphere(const Vector3f &center, float radius, const Rayf &r)
 //{
 //	Vector3f oc = r.origin - center;
@@ -680,7 +784,11 @@ public:
 	LightMaterial(Vector3f color) : emissiveColor(color) {}
 
 	bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const override {
-		return false;
+		return true;
+	}
+
+	Vector3f shadeClosestHit(const Rayf& r, const HitRecord& rec) override {
+		return emissiveColor;
 	}
 
 	Vector3f L_e() const override { return emissiveColor; }
@@ -1427,8 +1535,8 @@ int sfPathTraceWorker(WorkerContext* wc) {
 				float v = float(j + vjitter[s]) / (float)wc->sceneConfig->imageHeight;
 
 				//sample.addSample(wc->scene->trace(sfRayGenShader(u, v, wc), 0));
-				//sample.addSample(sfTraceRecursive(wc->scene, sfRayGenShader(wc->scene, u, v)));
-				sample.addSample(sfTraceIterative(wc->scene, sfRayGenShader(wc->scene, u, v)));
+				sample.addSample(sfTraceRecursive(wc->scene, sfRayGenShader(wc->scene, u, v)));
+				//sample.addSample(sfTraceIterative(wc->scene, sfRayGenShader(wc->scene, u, v)));
 			}
 			sample.finalize();
 
@@ -1536,21 +1644,14 @@ void Sunfish::makeDefaultScene_() {
 	auto diff = end - start;
 	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
 
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_0.ppm", 0);
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_1.ppm", 1);
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_2.ppm", 2);
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_3.ppm", 3);
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_4.ppm", 4);
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCubeMap.savePPM("pbsky_cubemap_5.ppm", 5);
-	//pathTracerScene.ssg.environment.pbsky.generatedSunCylMap.savePPM("pbsky_cylmap.ppm");
-
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Vector3f(0.8f, 0.1f, 0.1f), 0.05f)));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Vector3f(0.1f, 0.2f, 0.5f))));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -10000.5f, -1.0f), 10000.0f, new LambertianMaterial(Vector3f(0.8f, 0.8f, 0.0f))));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Vector3f(0.8f, 0.6f, 0.2f), 0.0f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -10000.5f, -1.0f), 10000.0f, new LambertianMaterial(Fx::ForestGreen)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Fx::Rose, 0.05f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Fx::Blue)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Fx::Gold, 0.0f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, 0.0f), 0.10f, new LightMaterial({ 100.0f,100.0f,100.0f })));
-
+	pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 0.0f, 0.5f, -0.5f }, new LambertianMaterial(Fx::White)));
+	
 	if (0) {
 		for (int curObj = 0; curObj < 100; curObj++) {
 			Vector3f disc = getRandomUnitDiscVector();
