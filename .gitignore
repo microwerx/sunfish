@@ -333,3 +333,7 @@ desktop.ini
 
 *.exr
 *.ppm
+
+
+build/CMake*
+build/**/
