@@ -1167,8 +1167,13 @@ string SunfishConfig::getParameters(int argc, const char** argv, int* i, const s
 
 
 SunfishConfig::SunfishConfig(int argc, const char** argv) {
+#ifdef NDEBUG
 	imageWidth = 1280;
 	imageHeight = 720;
+#else
+	imageWidth = 320;
+	imageHeight = 200;
+#endif
 	isServer = true;
 	isWorker = true;
 	numWorkers = 16;
@@ -1532,10 +1537,10 @@ int sfPathTraceWorker(WorkerContext* wc) {
 	float ujitter[MaxJitter];
 	float vjitter[MaxJitter];
 	for (auto& u : ujitter) {
-		u = RTrandom.lufrand() * wc->sceneConfig->jitterRadius;
+		u = RTrandom.frand() * wc->sceneConfig->jitterRadius;
 	}
 	for (auto& v : vjitter) {
-		v = RTrandom.lufrand() * wc->sceneConfig->jitterRadius;
+		v = RTrandom.frand() * wc->sceneConfig->jitterRadius;
 	}
 
 	// For every pixel
@@ -1592,6 +1597,7 @@ public:
 	void renderStop();
 	void render(unsigned numIterations);
 	void saveImage();
+
 private:
 	SunfishConfig sceneConfig;
 	RtoList world;
@@ -1607,7 +1613,10 @@ private:
 	std::chrono::steady_clock::time_point startTime;
 	std::chrono::steady_clock::time_point endTime;
 
-	void makeDefaultScene_();
+	bool _threadCheck();
+	void _threadStart();
+
+	void _makeDefaultScene();
 };
 
 
@@ -1626,7 +1635,7 @@ void Sunfish::loadScene() {
 }
 
 
-void Sunfish::makeDefaultScene_() {
+void Sunfish::_makeDefaultScene() {
 	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Vector3f(0.8f, 0.1f, 0.1f), 0.05f)));
 	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Vector3f(0.1f, 0.2f, 0.5f))));
 	world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -100.5f, -1.0f), 100.0f, new LambertianMaterial(Vector3f(0.8f, 0.8f, 0.0f))));
@@ -1664,8 +1673,8 @@ void Sunfish::makeDefaultScene_() {
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Fx::Gold, 0.0f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.5f, new DielectricMaterial(1.5f)));
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, 0.0f), 0.10f, new LightMaterial({ 100.0f,100.0f,100.0f })));
-	pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 0.0f, 0.5f, -0.5f }, new LambertianMaterial(Fx::White)));
-	
+	//pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 0.0f, 0.5f, -0.5f }, new LambertianMaterial(Fx::White)));
+
 	if (0) {
 		for (int curObj = 0; curObj < 100; curObj++) {
 			Vector3f disc = getRandomUnitDiscVector();
@@ -1686,7 +1695,7 @@ void Sunfish::makeDefaultScene_() {
 void Sunfish::render(unsigned numIterations) {
 	renderStart();
 	for (auto i = 0U; i < numIterations; i++) {
-		if (renderStep())
+		if (!renderStep())
 			break;
 	}
 	renderStop();
@@ -1699,10 +1708,53 @@ void Sunfish::renderStart() {
 	t0 = time(NULL);
 	framebuffer = Image4f{ (int)sceneConfig.imageWidth, (int)sceneConfig.imageHeight, 1 };
 
-	makeDefaultScene_();
+	_makeDefaultScene();
 
 	startTime = std::chrono::steady_clock::now();
 
+	//constexpr bool use_multithreading = false;
+	//if (use_multithreading) {
+	//	for (int i = 0; i < sceneConfig.imageWidth; i += sceneConfig.workgroupSizeX) {
+	//		for (int j = 0; j < sceneConfig.imageHeight; j += sceneConfig.workgroupSizeY) {
+	//			WorkerContext wc;
+
+	//			wc.left = i;
+	//			wc.right = std::min<int>(i + sceneConfig.workgroupSizeX - 1, sceneConfig.imageWidth - 1);
+	//			wc.top = j;
+	//			wc.bottom = std::min<int>(j + sceneConfig.workgroupSizeY - 1, sceneConfig.imageHeight - 1);
+	//			wc.framebuffer = &framebuffer;
+	//			wc.scene = &pathTracerScene;
+	//			wc.sceneConfig = &sceneConfig;
+
+	//			wcs.push_back(wc);
+	//		}
+	//	}
+
+	//	for (auto wc = wcs.begin(); wc != wcs.end(); wc++) {
+	//		WorkerContext* pwc = &(*wc);
+	//		futures.push_back(async(sfPathTraceWorker, pwc));
+	//	}
+	//}
+	//else {
+	//	WorkerContext wc;
+
+	//	wc.left = 0;
+	//	wc.right = sceneConfig.imageWidth - 1;
+	//	wc.top = 0;
+	//	wc.bottom = sceneConfig.imageHeight - 1;
+	//	wc.framebuffer = &framebuffer;
+	//	wc.scene = &pathTracerScene;
+	//	wc.sceneConfig = &sceneConfig;
+
+	//	sfPathTraceWorker(&wc);
+	//}
+
+	t1 = time(NULL);
+	dt = t1 - t0;
+	cerr << "Total start time: " << dt << endl;
+}
+
+void Sunfish::_threadStart() {
 	constexpr bool use_multithreading = false;
 	if (use_multithreading) {
 		for (int i = 0; i < sceneConfig.imageWidth; i += sceneConfig.workgroupSizeX) {
@@ -1739,14 +1791,10 @@ void Sunfish::renderStart() {
 
 		sfPathTraceWorker(&wc);
 	}
-
-	t1 = time(NULL);
-	dt = t1 - t0;
-	cerr << "Total start time: " << dt << endl;
 }
 
-
-bool Sunfish::renderStep() {
+bool Sunfish::_threadCheck() {
+	if (futures.empty()) return true;
 	size_t i = 0;
 	std::chrono::milliseconds span(0);
 	for (auto& f : futures) {
@@ -1754,11 +1802,18 @@ bool Sunfish::renderStep() {
 			i++;
 		else if (f.wait_for(span) == std::future_status::ready) {
 			i++;
-			std::cerr << ".";
 		}
 	}
 	if (i == futures.size())
 		return false;
+	return true;
+}
+
+
+bool Sunfish::renderStep() {
+	_threadStart();
+	while (!_threadCheck());
+	std::cerr << "." << std::flush;
 	return true;
 }
 
@@ -1826,15 +1881,9 @@ void Sunfish::saveImage() {
 
 
 int main(int argc, const char** argv) {
-	RTrandom.init(32768);
-
 	Sunfish sunfish{ argc, argv };
 	sunfish.loadScene();
-	sunfish.render(100);
+	sunfish.render(5);
 	sunfish.saveImage();
-
-	//std::string empty;
-	//std::getline(std::cin, empty);
-
 	return 0;
 }
