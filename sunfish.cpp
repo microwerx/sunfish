@@ -50,6 +50,7 @@
 #include <fluxions_ssg_environment.hpp>
 #include <fluxions_ssg.hpp>
 #include <fluxions_gte_colors.hpp>
+
 //#include <viperfish_utilities.hpp>
 
 #pragma comment(lib, "opengl32.lib")
@@ -69,63 +70,92 @@ using namespace Fluxions;
 //////////////////////////////////////////////////////////////////////
 
 
-class RandomLUT {
+class RandomNumberGenerator {
 public:
-	RandomLUT();
-	RandomLUT(int size);
+	RandomNumberGenerator() {}
 
-	void init(int size);
-	void seed(int seed);
+	inline void seed(unsigned seed) {
+		_frand_s.seed(seed);
+		_drand_s.seed(seed);
+		_irand_s.seed(seed);
+	}
 
-	float frand() { return _frand(0.0f, 1.0f); }
-	double drand();
-	int irand();
+	// return a number between 0.0f and 1.0f
+	inline float frand() { return frand(0.0f, 1.0f); }
 
-	float lufrand();
+	// return a number between 0.0 and 1.0
+	inline double drand() { return drand(0.0, 1.0); }
 
-	int size;
-	int curIndex;
-	vector<float> frandom;
-	vector<double> drandom;
-	vector<int> irandom;
+	// return a number between 0 and 32767
+	inline int irand() { return irand(0, 0x7fff); }
+
+	// return a uniform random number between t0 and t1
+	inline double frand(float t0, float t1) {
+		uniform_real_distribution<float> urd(t0, t1);
+		return urd(_drand_s);
+	}
+
+	// return a uniform random number between t0 and t1
+	inline double drand(double t0, double t1) {
+		uniform_real_distribution<double> urd(t0, t1);
+		return urd(_drand_s);
+	}
+
+	// return a uniform random number between t0 and t1
+	inline int irand(int t0, int t1) {
+		uniform_int_distribution<int> uid(t0, t1);
+		return uid(_irand_s);
+	}
+
 private:
-	float _frand(float min0, float max1);
-	double _drand(double min0, double max1);
-	int _irand(int min0, int max1);
-
 	mt19937 _frand_s;
 	mt19937 _drand_s;
 	mt19937 _irand_s;
 };
 
 
-RandomLUT::RandomLUT() {
-	init(32768);
-}
+class RandomLUT : public RandomNumberGenerator {
+public:
+	RandomLUT(size_t size = 32768);
+
+	void init(size_t size);
+	void seed(unsigned seed);
+
+	float frand();
+	double drand();
+	int irand();
+
+private:
+	size_t size;
+	size_t curIndex;
+	vector<float> frandom;
+	vector<double> drandom;
+	vector<int> irandom;
+};
 
 
-RandomLUT::RandomLUT(int size) {
+RandomLUT::RandomLUT(size_t size) {
 	init(size);
 }
 
 
-void RandomLUT::init(int size) {
+void RandomLUT::init(size_t size) {
 	this->size = size;
 	frandom.resize(size);
 	drandom.resize(size);
 	irandom.resize(size);
 
 	for (int i = 0; i < size; i++) {
-		frandom[i] = _frand(0.0f, 1.0f);
-		drandom[i] = _drand(0.0f, 1.0f);
-		irandom[i] = _irand(0, RAND_MAX);
+		frandom[i] = RandomNumberGenerator::frand();
+		drandom[i] = RandomNumberGenerator::drand();
+		irandom[i] = RandomNumberGenerator::irand();
 	}
 
 	curIndex = 0;
 }
 
 
-float RandomLUT::lufrand() {
+float RandomLUT::frand() {
 	curIndex = (curIndex + 1);
 	if (curIndex >= size) curIndex = 0;
 	return frandom[curIndex];
@@ -148,25 +178,8 @@ int RandomLUT::irand() {
 }
 
 
-float RandomLUT::_frand(float t0, float t1) {
-	uniform_real_distribution<float> urd(t0, t1);
-	return urd(_frand_s);
-}
 
-
-double RandomLUT::_drand(double t0, double t1) {
-	uniform_real_distribution<double> urd(t0, t1);
-	return urd(_drand_s);
-}
-
-
-int RandomLUT::_irand(int t0, int t1) {
-	uniform_int_distribution<int> uid(t0, t1);
-	return uid(_irand_s);
-}
-
-
-void RandomLUT::seed(int seed) {
+void RandomLUT::seed(unsigned seed) {
 	curIndex = seed % frandom.size();
 }
 
@@ -176,7 +189,8 @@ void RandomLUT::seed(int seed) {
 //////////////////////////////////////////////////////////////////////
 
 
-RandomLUT RTrandom;
+//RandomLUT RTrandom;
+RandomNumberGenerator RTrandom;
 
 
 Vector3f getRandomUnitSphereVector() {
