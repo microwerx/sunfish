@@ -421,19 +421,19 @@ struct HitRecord {
 
 
 //////////////////////////////////////////////////////////////////////
-// RayTraceObject ////////////////////////////////////////////////////
+// SfRayTraceObject ////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
-// A RayTraceObject is used as a base class for an object that can
+// A SfRayTraceObject is used as a base class for an object that can
 // be intersected by a ray. It supports the virtual methods:
 // - closestHit
 // - anyHit
 //////////////////////////////////////////////////////////////////////
 
 
-class RayTraceObject {
+class SfRayTraceObject {
 public:
-	RayTraceObject() {}
-	RayTraceObject(const string& name) : name(name) {}
+	SfRayTraceObject() {}
+	SfRayTraceObject(const string& name) : name(name) {}
 
 	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		rec.pmaterial = material;
@@ -487,7 +487,7 @@ public:
 // InstancedRTO //////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
 // An InstancedRTO implements the closestHit and anyHit methods from
-// a RayTraceObject. It is initialized with a pointer to a different
+// a SfRayTraceObject. It is initialized with a pointer to a different
 // object.
 //
 // TODO:
@@ -495,11 +495,11 @@ public:
 //////////////////////////////////////////////////////////////////////
 
 
-class InstancedRTO : public RayTraceObject {
+class InstancedRTO : public SfRayTraceObject {
 public:
 	InstancedRTO() : pRTO(nullptr) {}
-	InstancedRTO(const string& name, RayTraceObject* rto)
-		: RayTraceObject(name), pRTO(rto) {}
+	InstancedRTO(const string& name, SfRayTraceObject* rto)
+		: SfRayTraceObject(name), pRTO(rto) {}
 
 	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
 		if (pRTO) pRTO->closestHit(r, tMin, tMax, rec);
@@ -511,7 +511,7 @@ public:
 		return false;
 	}
 
-	RayTraceObject* pRTO;
+	SfRayTraceObject* pRTO;
 };
 
 
@@ -523,7 +523,7 @@ public:
 //////////////////////////////////////////////////////////////////////
 
 
-class RtoList : RayTraceObject {
+class RtoList : SfRayTraceObject {
 public:
 	RtoList() {}
 	RtoList(size_t numElements) { RTOs.resize(numElements); }
@@ -537,7 +537,7 @@ public:
 	virtual bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
 	virtual bool anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const;
 
-	vector<RayTraceObject*> RTOs;
+	vector<SfRayTraceObject*> RTOs;
 };
 
 
@@ -582,7 +582,7 @@ bool RtoList::anyHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) cons
 //////////////////////////////////////////////////////////////////////
 
 
-class RtoSphere : public RayTraceObject {
+class RtoSphere : public SfRayTraceObject {
 public:
 	RtoSphere() {}
 	RtoSphere(Vector3f _center, float _radius, Material* pmat)
@@ -638,7 +638,7 @@ static inline float sdfBox(Vector3f p, Vector3f b) {
 }
 
 
-class RtoBox : public RayTraceObject {
+class RtoBox : public SfRayTraceObject {
 public:
 	RtoBox(Vector3f b, Vector3f center, Material* pmat) :
 		_box(b), _center(center) {
@@ -684,27 +684,88 @@ private:
 // SfMesh ////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
 
+struct SfTriangle {
+	Vector3f position[3];
+	Vector3f edge[3];
+	Vector3f N;
+	float d;
+	Material* material;
+};
 
-class SfMesh : public RayTraceObject {
+class SfMesh : public SfRayTraceObject {
 public:
 	SfMesh() {}
 
-	void addTriangle(Vector3f p1, Vector3f p2, Vector3f p3);
+	void addTriangle(Vector3f p1, Vector3f p2, Vector3f p3, Material* pmat);
 
+	bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const override;
 private:
-	std::vector<Vector3f> positions;
-	std::vector<Vector3f> normals;
+	std::vector<SfTriangle> triangles;
+	//std::vector<Vector3f> positions;
+	//std::vector<Vector3f> normals;
 };
 
 
-void SfMesh::addTriangle(Vector3f p1, Vector3f p2, Vector3f p3) {
-	positions.push_back(p1);
-	positions.push_back(p2);
-	positions.push_back(p3);
-	Vector3f BminusA = p2 - p1;
-	Vector3f CminusA = p3 - p1;
-	Vector3f N = cross(BminusA, CminusA).normalize();
-	normals.push_back(N);
+void SfMesh::addTriangle(Vector3f p1, Vector3f p2, Vector3f p3, Material* pmat) {
+	SfTriangle triangle;
+	triangle.position[0] = p1;
+	triangle.position[1] = p2;
+	triangle.position[2] = p3;
+	triangle.edge[0] = p2 - p1;
+	triangle.edge[1] = p3 - p2;
+	triangle.edge[2] = p1 - p3;
+	Vector3f side1 = p2 - p1;
+	Vector3f side2 = p3 - p1;
+	triangle.N = cross(side1, side2).normalize();
+	triangle.d = dot(triangle.N, p1);
+	triangles.push_back(triangle);
+}
+
+
+bool sfRayTriangleTest(const Rayf& r, float tMin, float tMax, const SfTriangle& triangle, float& t) {
+	float NdotD = dot(r.direction, triangle.N);
+	// ray is almost parallel to plane?
+	if (fabs(NdotD) <= 0.0001f) return false;
+	float NdotO = dot(r.origin, triangle.N);
+	t = (triangle.d - NdotO) / NdotD;
+
+	// plane too far away?
+	if (t < tMin || t > tMax) return false;
+
+	// find out if point is inside triangle
+	Vector3f pointOnPlane = r.getPointAtParameter(t);
+	Vector3f dirToP0 = pointOnPlane - triangle.position[0];
+	Vector3f dirToP1 = pointOnPlane - triangle.position[1];
+	Vector3f dirToP2 = pointOnPlane - triangle.position[2];
+	float side1 = dot(triangle.N, cross(triangle.edge[0], dirToP0));
+	float side2 = dot(triangle.N, cross(triangle.edge[1], dirToP1));
+	float side3 = dot(triangle.N, cross(triangle.edge[2], dirToP2));
+
+	// if all three are positive, then they are inside
+	return (side1 >= 0 && side2 >= 0 && side3 >= 0);
+}
+
+
+bool SfMesh::closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+	float bestT = RAY_TMAX;
+	const SfTriangle* bestTriangle = nullptr;
+	for (size_t i = 0; i < triangles.size(); i++) {
+		float t;
+		if (sfRayTriangleTest(r, tMin, tMax, triangles[i], t)) {
+			if (bestT > t) {
+				bestT = t;
+				bestTriangle = &triangles[i];
+			}
+		}
+	}
+	if (bestTriangle) {
+		rec.t = bestT;
+		rec.p = r.getPointAtParameter(rec.t);
+		rec.normal = bestTriangle->N;
+		rec.pmaterial = bestTriangle->material;
+		return true;
+	}
+	return false;
 }
 
 
@@ -1016,7 +1077,7 @@ public:
 	Scene();
 	~Scene();
 
-	void addRTO(const string& name, RayTraceObject* rto);
+	void addRTO(const string& name, SfRayTraceObject* rto);
 	void addMaterial(const string& name, Material* material);
 	void addInstance(const string& instanceName, const string& geometryName);
 	//Vector3f trace(const Rayf& r, int depth);
@@ -1026,7 +1087,7 @@ public:
 	//SimpleEnvironment environment;
 	Camera camera;
 	RtoList world;
-	map<string, RayTraceObject*> geometry;
+	map<string, SfRayTraceObject*> geometry;
 	map<string, Material*> materials;
 private:
 	Material* pCurMtl{ nullptr };
@@ -1039,7 +1100,7 @@ Scene::Scene() {}
 Scene::~Scene() {}
 
 
-void Scene::addRTO(const string& name, RayTraceObject* rto) {
+void Scene::addRTO(const string& name, SfRayTraceObject* rto) {
 	if (geometry[name] != nullptr) {
 		delete geometry[name];
 		geometry[name] = nullptr;
@@ -1196,7 +1257,7 @@ SunfishConfig::SunfishConfig(int argc, const char** argv) {
 #ifdef NDEBUG
 	samplesPerPixel = 100;
 #else
-	samplesPerPixel = 1000;
+	samplesPerPixel = 5;
 #endif
 	jitterRadius = 1.0f;
 	rayDepth = 16;
@@ -1494,7 +1555,7 @@ Vector3f sfTraceIterative(Scene* scene, Rayf r, size_t maxRayDepth) {
 	//Vector3f attenuation[N];
 	Vector3f L_i;
 	Vector3f f_r[N];
-	float NdotL[N];
+	float NdotL[N]{};
 	size_t it{ 0 };
 	for (; it < maxRayDepth; it++) {
 		Rayf scatteredRay;
@@ -1541,8 +1602,8 @@ int sfPathTraceWorker(WorkerContext* wc) {
 	// This is a predetermined jitter map for sampling around the ray
 	constexpr size_t MaxJitter = 1024;
 	static size_t jitterIndex = 0;
-	static float ujitter[MaxJitter];
-	static float vjitter[MaxJitter];
+	static float ujitter[MaxJitter]{};
+	static float vjitter[MaxJitter]{};
 	if (jitterIndex == 0) {
 		for (auto& u : ujitter) {
 			u = RTrandom.frand() * wc->config->jitterRadius;
@@ -1830,6 +1891,14 @@ void Sunfish::_makeDefaultScene() {
 	pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { -0.8f, 0.0f, -1.0f }, new DielectricMaterial(2.4f)));
 	//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 1.0f, -2.0f), 0.10f, new LightMaterial({ 100.0f,100.0f,100.0f })));
 
+	auto cyanMaterial = new LambertianMaterial(Fx::Cyan);
+	auto roseMaterial = new LambertianMaterial(Fx::Rose);
+	SfMesh* mesh = new SfMesh();
+	mesh->addTriangle({ -1.0f, 0.0f, 0.0f }, { 1.0f,  0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, cyanMaterial);
+	mesh->addTriangle({ -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, roseMaterial);
+
+	pathTracerScene.world.RTOs.push_back(mesh);
+
 	if (0) {
 		for (int curObj = 0; curObj < 100; curObj++) {
 			Vector3f disc = getRandomUnitDiscVector();
@@ -1903,7 +1972,7 @@ void DoSunfishTests() {
 		dielectric.scatter(incoming, hr, attenuation, scattered);
 		HFLOGDEBUG("scattered D:     % 3.3f % 3.3f % 3.3f % 3.3f", scattered.direction.x, scattered.direction.y, scattered.direction.z, dielectric.F);
 	}
-	
+
 	HFLOGINFO("");
 
 	// Try ray inside object
