@@ -680,6 +680,34 @@ private:
 };
 
 
+//////////////////////////////////////////////////////////////////////
+// SfMesh ////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
+
+class SfMesh : public RayTraceObject {
+public:
+	SfMesh() {}
+
+	void addTriangle(Vector3f p1, Vector3f p2, Vector3f p3);
+
+private:
+	std::vector<Vector3f> positions;
+	std::vector<Vector3f> normals;
+};
+
+
+void SfMesh::addTriangle(Vector3f p1, Vector3f p2, Vector3f p3) {
+	positions.push_back(p1);
+	positions.push_back(p2);
+	positions.push_back(p3);
+	Vector3f BminusA = p2 - p1;
+	Vector3f CminusA = p3 - p1;
+	Vector3f N = cross(BminusA, CminusA).normalize();
+	normals.push_back(N);
+}
+
+
 //float hit_sphere(const Vector3f &center, float radius, const Rayf &r)
 //{
 //	Vector3f oc = r.origin - center;
@@ -991,8 +1019,8 @@ public:
 	void addRTO(const string& name, RayTraceObject* rto);
 	void addMaterial(const string& name, Material* material);
 	void addInstance(const string& instanceName, const string& geometryName);
-	Vector3f trace(const Rayf& r, int depth);
-	void render();
+	//Vector3f trace(const Rayf& r, int depth);
+	//void render();
 
 	SimpleSceneGraph ssg;
 	//SimpleEnvironment environment;
@@ -1031,29 +1059,29 @@ void Scene::addInstance(const string& instanceName, const string& geometryName) 
 }
 
 
-Vector3f Scene::trace(const Rayf& r, int depth) {
-	static NormalShadeMaterial defaultMaterial;
-	HitRecord rec;
+//Vector3f Scene::trace(const Rayf& r, int depth) {
+//	static NormalShadeMaterial defaultMaterial;
+//	HitRecord rec;
+//
+//	if (world.closestHit(r, 0.001f, FLT_MAX, rec)) {
+//		Rayf scatteredRay;
+//		Vector3f attenuation;
+//		if (depth < 50 && rec.pmaterial->scatter(r, rec, attenuation, scatteredRay)) {
+//			return attenuation * trace(scatteredRay, depth + 1);
+//		}
+//		else {
+//			return Vector3f(0.0f, 0.0f, 0.0f);
+//		}
+//	}
+//	else {
+//		return defaultMaterial.shadeMissedHit(r, ssg.environment);
+//	}
+//}
 
-	if (world.closestHit(r, 0.001f, FLT_MAX, rec)) {
-		Rayf scatteredRay;
-		Vector3f attenuation;
-		if (depth < 50 && rec.pmaterial->scatter(r, rec, attenuation, scatteredRay)) {
-			return attenuation * trace(scatteredRay, depth + 1);
-		}
-		else {
-			return Vector3f(0.0f, 0.0f, 0.0f);
-		}
-	}
-	else {
-		return defaultMaterial.shadeMissedHit(r, ssg.environment);
-	}
-}
 
-
-void Scene::render() {
-
-}
+//void Scene::render() {
+//
+//}
 
 
 //////////////////////////////////////////////////////////////////////
@@ -1421,15 +1449,13 @@ struct SunfishSample {
 	}
 };
 
+
 int sfPathTraceWorker(WorkerContext* wc);
-
-// sfRayGenShader(u, v, wc) calculates an initial ray using (u,v) as 2D coordinates in a window
-Rayf sfRayGenShader(Scene* scene, float u, float v);
-
 Vector3f sfTraceRecursive(Scene* scene, Rayf r, unsigned depth = 0);
 Vector3f sfTraceIterative(Scene* scene, Rayf r, size_t maxRayDepth = 25);
 
 
+// sfRayGenShader(u, v, wc) calculates an initial ray using (u,v) as 2D coordinates in a window
 Rayf sfRayGenShader(Scene* scene, float u, float v) {
 	return scene->camera.getRayDOF(u, v);
 }
