@@ -1825,17 +1825,150 @@ void Sunfish::saveImage() {
 }
 
 
+bool Sunfish::_threadCheck() {
+	if (futures.empty()) return true;
+	size_t i = 0;
+	std::chrono::milliseconds span(0);
+	for (auto& f : futures) {
+		if (!f.valid())
+			i++;
+		else if (f.wait_for(span) == std::future_status::ready) {
+			i++;
+		}
+	}
+	if (i == futures.size())
+		return false;
+	return true;
+}
+
+
+void Sunfish::_makeDefaultScene() {
+	pathTracerScene.camera.lensRadius = 0.0f;// 0.1f;
+	pathTracerScene.camera.setProjection(45.0f, config.imageAspect, 0.001f, 100.0f);
+	pathTracerScene.camera.setLookAt(Vector3f(0.0f, 0.0f, 1.0f), Vector3f(0.0f, 0.0f, -1.0f), Vector3f(0.0f, 1.0f, 0.0f));
+
+	auto start = std::chrono::steady_clock::now();
+
+	Hf::StopWatch stopwatch;
+	pathTracerScene.ssg.environment.setGroundAlbedo({ 0.1f, 0.1f, 0.1f });
+	Sf::PA::CivilDateTime dtg = {
+		1, 5, 2016, true, -4,
+		10,0,0,0.0f,
+		27.907360f, -82.324440f };
+	pathTracerScene.ssg.environment.setCivilDateTime(dtg);
+	pathTracerScene.ssg.environment.setTurbidity(config.sun_turbidity);
+	pathTracerScene.ssg.environment.setNumSamples(1);
+	pathTracerScene.ssg.environment.computeAstroFromLocale();
+	pathTracerScene.ssg.environment.computePBSky();
+	//pathTracerScene.ssg.environment.ComputeCubeMap(256, false, 8.0f, true);
+	//pathTracerScene.ssg.environment.ComputeCylinderMap(512, 128);
+	stopwatch.Stop();
+	auto end = std::chrono::steady_clock::now();
+	auto diff = end - start;
+	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
+
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -10000.5f, -1.0f), 10000.0f, new LambertianMaterial(Fx::ForestGreen)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Fx::Rose, 0.05f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Fx::Blue)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Fx::Gold, 0.0f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.25f, new DielectricMaterial(1.5f)));
+	//pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 0.0f, 0.5f, -0.5f }, new LightMaterial(1600.0f * Fx::White)));
+	pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { -0.8f, 0.0f, -1.0f }, new DielectricMaterial(2.4f)));
+	//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 1.0f, -2.0f), 0.10f, new LightMaterial({ 100.0f,100.0f,100.0f })));
+
+	if (0) {
+		for (int curObj = 0; curObj < 100; curObj++) {
+			Vector3f disc = getRandomUnitDiscVector();
+			Vector3f color = 0.5f * (1.0f + getRandomUnitSphereVector().unit());
+
+			//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, 0.025f, 4.0f * disc.y), 0.025f, new LambertianMaterial(color)));
+			pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(4.0f * disc.x, rand() / (float)RAND_MAX, 4.0f * disc.y), 0.1f * rand() / (float)RAND_MAX, new MetalMaterial(color, rand() / (float)RAND_MAX)));
+		}
+	}
+	//pathTracer.AddRTO("smallSphere", new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f));
+	//pathTracer.AddRTO("largeSphere", new RtoSphere(Vector3f(0.0f, -100.5f, -1.0f), 100.0f));
+	//pathTracer.AddInstance("smallSphere01", "smallSphere");
+	//pathTracer.AddInstance("largeSphere01", "largeSphere");
+	//pathTracer.AddMaterial("normalShader", new NormalShadeMaterial);
+}
+
+
+void Sunfish::_gammaCorrectFramebuffer() {
+	float invSampleCount = 1.0f / (float)config.raysPerPixel * config.samplesPerPixel;
+	gammaCorrect(framebuffer, invSampleCount, 0.0f, 1.0f);
+}
+
+
 //////////////////////////////////////////////////////////////////////
 // main() ////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
 // entry point for the program
 //////////////////////////////////////////////////////////////////////
 
+void DoSunfishTests();
 
 int main(int argc, const char** argv) {
+	DoSunfishTests();
 	Sunfish sunfish{ argc, argv };
 	sunfish.loadScene();
-	sunfish.render(5);
+	sunfish.render(1);
 	sunfish.saveImage();
 	return 0;
 }
+
+void DoSunfishTests() {
+	RTrandom.seed(time(0));
+	DielectricMaterial dielectric(1.5f);
+	float degrees = RTrandom.frand(0.0f, 180.0f);
+	HFLOGINFO("Dielectric F0 = % 3.3f at % 3.3f degrees", dielectric.F_0, degrees);
+	float intheta = Radians(degrees);
+	float incos = std::cos(intheta);
+	float insin = std::sin(intheta);
+	float rx = 2.0f * incos;
+	float ry = 2.0f * insin;
+	Rayf incoming{ {rx, ry, 0.0f }, { -incos, -insin, 0.0f } };
+	BoundingBoxf aabb;
+	aabb += {-2.0f, 0.0f, -2.0f};
+	aabb += { 2.0f, -2.0f, 2.0f};
+	HitRecord hr{};
+	hr.t = rayIntersectsAabb(incoming, aabb, 0.0f, 1e10f);
+	hr.p = incoming.getPointAtParameter(hr.t);
+	hr.normal = aabbNormal(hr.p, aabb.center());
+	hr.pmaterial = &dielectric;
+	Vector3f attenuation;
+	Rayf scattered;
+	HFLOGDEBUG("box: (% 3.3f % 3.3f % 3.3f) - (% 3.3f % 3.3f % 3.3f)",
+			   aabb.minBounds.x, aabb.minBounds.y, aabb.minBounds.z,
+			   aabb.maxBounds.x, aabb.maxBounds.y, aabb.maxBounds.z);
+	HFLOGDEBUG("incoming O:      % 3.3f % 3.3f % 3.3f", incoming.origin.x, incoming.origin.y, incoming.origin.z);
+	HFLOGDEBUG("incoming D:      % 3.3f % 3.3f % 3.3f", incoming.direction.x, incoming.direction.y, incoming.direction.z);
+	HFLOGDEBUG("hr point:        % 3.3f % 3.3f % 3.3f % 3.3f", hr.p.x, hr.p.y, hr.p.z, hr.t);
+	HFLOGDEBUG("hr normal:       % 3.3f % 3.3f % 3.3f", hr.normal.x, hr.normal.y, hr.normal.z);
+	HFLOGDEBUG("scattered O:     % 3.3f % 3.3f % 3.3f", scattered.origin.x, scattered.origin.y, scattered.origin.z);
+	for (unsigned i = 0; i < 10; i++) {
+		dielectric.scatter(incoming, hr, attenuation, scattered);
+		HFLOGDEBUG("scattered D:     % 3.3f % 3.3f % 3.3f % 3.3f", scattered.direction.x, scattered.direction.y, scattered.direction.z, dielectric.F);
+	}
+	
+	HFLOGINFO("");
+
+	// Try ray inside object
+	aabb.reset();
+	aabb += {-2.0f, -2.0f, -2.0f};
+	aabb += { 2.0f, 2.0f, 2.0f};
+	incoming.origin.reset();
+	hr.t = rayIntersectsAabb(incoming, aabb, 0.0f, 1e10f);
+	hr.p = incoming.getPointAtParameter(hr.t);
+	hr.normal = aabbNormal(hr.p, aabb.center());
+	hr.pmaterial = &dielectric;
+
+	HFLOGDEBUG("box: (% 3.3f % 3.3f % 3.3f) - (% 3.3f % 3.3f % 3.3f)",
+			   aabb.minBounds.x, aabb.minBounds.y, aabb.minBounds.z,
+			   aabb.maxBounds.x, aabb.maxBounds.y, aabb.maxBounds.z);
+	HFLOGDEBUG("incoming O:      % 3.3f % 3.3f % 3.3f", incoming.origin.x, incoming.origin.y, incoming.origin.z);
+	HFLOGDEBUG("incoming D:      % 3.3f % 3.3f % 3.3f", incoming.direction.x, incoming.direction.y, incoming.direction.z);
+	HFLOGDEBUG("hr point:        % 3.3f % 3.3f % 3.3f % 3.3f", hr.p.x, hr.p.y, hr.p.z, hr.t);
+	HFLOGDEBUG("hr normal:       % 3.3f % 3.3f % 3.3f", hr.normal.x, hr.normal.y, hr.normal.z);
+	HFLOGDEBUG("scattered O:     % 3.3f % 3.3f % 3.3f", scattered.origin.x, scattered.origin.y, scattered.origin.z);
+	for (unsigned i = 0; i < 10; i++) {
+		dielectric.scatter(in
