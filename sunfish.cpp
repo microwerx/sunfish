@@ -50,6 +50,9 @@
 #include <fluxions_ssg_environment.hpp>
 #include <fluxions_ssg.hpp>
 #include <fluxions_gte_colors.hpp>
+#include <fluxions_gte_ray_tracing.hpp>
+#include <fluxions_gte_image_operations.hpp>
+#include <fluxions_gte_shading.hpp>
 
 //#include <viperfish_utilities.hpp>
 
@@ -214,30 +217,6 @@ Vector3f getRandomUnitDiscVector() {
 //////////////////////////////////////////////////////////////////////
 // Utility Functions /////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
-
-
-Vector3f reflect(const Vector3f& v, const Vector3f& n) {
-	return v - 2.0f * dot(v, n) * n;
-}
-
-
-bool refract(const Vector3f& v, const Vector3f& n, float ni_over_nt, Vector3f& refracted) {
-	Vector3f uv = v.unit();
-	float dt = dot(uv, n);
-	float discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dt * dt);
-	if (discriminant > 0.0f) {
-		refracted = ni_over_nt * (v - n * dt) - n * sqrt(discriminant);
-		return true;
-	}
-	return false;
-}
-
-
-float schlick(float cosine, float F_0) {
-	float r0 = (1.0f - F_0) / (1.0f + F_0);
-	r0 = r0 * r0;
-	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
-}
 
 
 //////////////////////////////////////////////////////////////////////
@@ -465,6 +444,34 @@ public:
 		return false;
 	}
 
+
+	bool raymarch(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
+		constexpr int MaxIterations = 32;
+		constexpr float EPSILON = 0.001f;
+		constexpr Vector3f XEPS{ EPSILON, 0.0f, 0.0f };
+		constexpr Vector3f YEPS{ 0.0f, EPSILON, 0.0f };
+		constexpr Vector3f ZEPS{ 0.0f, 0.0f, EPSILON };
+		float t = tMin;
+		for (int i = 0; i < MaxIterations; i++) {
+			Vector3f p = r.getPointAtParameter(t);
+			float d = map(p);
+			if (d > -EPSILON && d < EPSILON) {
+				rec.p = p;
+				rec.t = t;
+				rec.normal = Vector3f(map(p + XEPS) - map(p - XEPS),
+									  map(p + YEPS) - map(p - YEPS),
+									  map(p + ZEPS) - map(p - ZEPS)).unit();
+				rec.pmaterial = material;
+				return true;
+			}
+			t += abs(d);
+			if (t > tMax)
+				return false;
+		}
+		return false;
+	}
+
+
 	// map(p) is used for signed distance functions.
 	// @returns t
 	virtual float map(Vector3f p) const {
@@ -625,48 +632,6 @@ bool RtoSphere::closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec
 //////////////////////////////////////////////////////////////////////
 
 
-template <typename T>
-constexpr float dot2(TVector2<T> a) {
-	return dot(a, a);
-}
-
-
-template <typename T>
-constexpr float dot2(TVector3<T> a) {
-	return dot(a, a);
-}
-
-
-template <typename T>
-constexpr TVector3<T> abs(TVector3<T> a) {
-	return { std::abs(a.x), std::abs(a.y), std::abs(a.z) };
-}
-
-
-template <typename T>
-constexpr TVector3<T> min(TVector3<T> a, TVector3<T> b) {
-	return { std::min<T>(a.x,b.x), std::min<T>(a.y, b.y), std::min<T>(a.z, b.z) };
-}
-
-
-template <typename T>
-constexpr TVector3<T> max(TVector3<T> a, TVector3<T> b) {
-	return { std::max<T>(a.x,b.x), std::max<T>(a.y, b.y), std::max<T>(a.z, b.z) };
-}
-
-
-template <typename T>
-constexpr TVector3<T> max(TVector3<T> a, T b) {
-	return { std::max<T>(a.x, b), std::max<T>(a.y, b), std::max<T>(a.z, b) };
-}
-
-
-template <typename T>
-constexpr float length(TVector3<T> a) {
-	return std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
-}
-
-
 static inline float sdfBox(Vector3f p, Vector3f b) {
 	Vector3f q = abs(p) - b;
 	return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f);
@@ -681,31 +646,28 @@ public:
 	}
 
 	bool closestHit(const Rayf& r, float tMin, float tMax, HitRecord& rec) const {
-		constexpr int MaxIterations = 32;
-		constexpr float EPSILON = 0.001f;
-		constexpr Vector3f XEPS{ EPSILON, 0.0f, 0.0f };
-		constexpr Vector3f YEPS{ 0.0f, EPSILON, 0.0f };
-		constexpr Vector3f ZEPS{ 0.0f, 0.0f, EPSILON };
-		float t = tMin;
-		for (int i = 0; i < MaxIterations; i++) {
-			Vector3f p = r.getPointAtParameter(t);
-			float d = map(p);
-			if (d > -EPSILON && d < EPSILON) {
-				rec.p = p;
-				rec.t = t;
-				rec.normal = Vector3f(map(p + XEPS) - map(p - XEPS),
-									  map(p + YEPS) - map(p - YEPS),
-									  map(p + ZEPS) - map(p - ZEPS)).unit();
-				rec.pmaterial = material;
-				return true;
-			}
-			t += d;
-			if (t > tMax)
-				return false;
-		}
-		return false;
+		float t = rayIntersectsAabb(r, aabb(), tMin, tMax);
+		if (t == Fluxions::RAY_TMAX) return false;
+		rec.t = t;
+		rec.pmaterial = material;
+		rec.p = r.getPointAtParameter(t);
+		rec.normal = aabbNormal(rec.p, _center);
+		return true;
+		//return raymarch(r, tMin, tMax, rec);
 	}
 
+	bool anyhit(const Rayf& r, float tMin, float tMax) const {
+		float t = rayIntersectsAabb(r, aabb(), tMin, tMax);
+		if (t == Fluxions::RAY_TMAX) return false;
+		return true;
+	}
+
+	BoundingBoxf aabb() const {
+		BoundingBoxf bbox;
+		bbox += _center - _box;
+		bbox += _center + _box;
+		return bbox;
+	}
 
 	// Returns distance to object
 	float map(Vector3f p) const override {
@@ -1435,16 +1397,6 @@ struct SunfishSample {
 			sigma2 += x_i[i] - mu;
 		}
 		sigma2 /= (double)count;
-	}
-
-	// gammaCorrect(e, g) adjusts the image for exposure and gamma correction
-	// @returns powf(powf(2.0f, e) * output, g)
-	Color4f gammaCorrect(float e = 0.0f, float g = 2.4f) const {
-		float exposure = powf(2.0f, e);
-		return {
-			pow(exposure * output.x, g),
-			pow(exposure * output.y, g),
-			pow(exposure * output.z, g), 1.0f };
 	}
 };
 
