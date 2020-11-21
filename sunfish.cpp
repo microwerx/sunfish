@@ -53,6 +53,7 @@
 #include <fluxions_gte_ray_tracing.hpp>
 #include <fluxions_gte_image_operations.hpp>
 #include <fluxions_gte_shading.hpp>
+#include <cassert>
 
 //#include <viperfish_utilities.hpp>
 
@@ -688,8 +689,18 @@ struct SfTriangle {
 	Vector3f position[3];
 	Vector3f edge[3];
 	Vector3f N;
-	float d;
-	Material* material;
+	float d{};
+	Material* material{ nullptr };
+
+	void precompute() {
+		edge[0] = position[1] - position[0];
+		edge[1] = position[2] - position[1];
+		edge[2] = position[0] - position[2];
+		Vector3f side1 = position[1] - position[0];
+		Vector3f side2 = position[2] - position[0];
+		N = cross(side1, side2).normalize();
+		d = dot(N, position[0]);
+	}
 };
 
 class SfMesh : public SfRayTraceObject {
@@ -711,13 +722,8 @@ void SfMesh::addTriangle(Vector3f p1, Vector3f p2, Vector3f p3, Material* pmat) 
 	triangle.position[0] = p1;
 	triangle.position[1] = p2;
 	triangle.position[2] = p3;
-	triangle.edge[0] = p2 - p1;
-	triangle.edge[1] = p3 - p2;
-	triangle.edge[2] = p1 - p3;
-	Vector3f side1 = p2 - p1;
-	Vector3f side2 = p3 - p1;
-	triangle.N = cross(side1, side2).normalize();
-	triangle.d = dot(triangle.N, p1);
+	triangle.material = pmat;
+	triangle.precompute();
 	triangles.push_back(triangle);
 }
 
@@ -1235,9 +1241,9 @@ string SunfishConfig::getParameters(int argc, const char** argv, int* i, const s
 
 
 SunfishConfig::SunfishConfig(int argc, const char** argv) {
-#ifdef NDEBUG
-	imageWidth = 1280;
-	imageHeight = 720;
+#ifndef NDEBUG
+	imageWidth = 1280 * 2;
+	imageHeight = 720 * 2;
 #else
 	imageWidth = 480;
 	imageHeight = 200;
@@ -1523,8 +1529,20 @@ Rayf sfRayGenShader(Scene* scene, float u, float v) {
 
 
 inline Vector3f sfRayMissShader(const Rayf& r, Scene* scene) {
-	return sfShadeSkyPhysical(r, scene->ssg.environment);
-	//return sfShadeSkyShirley(r);
+	constexpr int choice = 2;
+	switch (choice) {
+	case 0:
+		return sfShadeSkyPhysical(r, scene->ssg.environment);
+		break;
+	case 1:
+		return sfShadeSkyShirley(r);
+		break;
+	case 2:
+		return sfShadeSkyDawn(r);
+		break;
+	default:
+		return Fx::Black;
+	}
 }
 
 
@@ -1882,20 +1900,81 @@ void Sunfish::_makeDefaultScene() {
 	auto diff = end - start;
 	std::cerr << "Hosek Wilkie: " << stopwatch.GetMillisecondsElapsed() << " ms" << std::endl;
 
+	// Ground sphere //////////////////////
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -10000.5f, -1.0f), 10000.0f, new LambertianMaterial(Fx::ForestGreen)));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Fx::Rose, 0.05f)));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Fx::Blue)));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Fx::Gold, 0.0f)));
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.25f, new DielectricMaterial(1.5f)));
-	//pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 0.0f, 0.5f, -0.5f }, new LightMaterial(1600.0f * Fx::White)));
-	pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { -0.8f, 0.0f, -1.0f }, new DielectricMaterial(2.4f)));
-	//pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 1.0f, -2.0f), 0.10f, new LightMaterial({ 100.0f,100.0f,100.0f })));
 
+	// Front center, rose metal sphere ////
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Fx::Rose, 0.05f)));
+
+	// Center, Blue lambertian sphere /////
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Fx::Blue)));
+
+	// Right, Gold Sphere /////////////////
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Fx::Gold, 0.0f)));
+
+	// Left, Dielectric sphere ////////////
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.25f, new DielectricMaterial(1.5f)));
+
+	//pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { -0.8f, 0.0f, -1.0f }, new DielectricMaterial(2.4f)));
+
+	constexpr int includeLights = 0;
+	if (includeLights) {
+		// Top Left, Light Sphere /////////////
+		pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 1.0f, -2.0f), 0.10f, new LightMaterial(1600.0f * Fx::White)));
+
+		// Top Right, Light Box ///////////////
+		pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 1.0f, 1.0f, -2.0f }, new LightMaterial(1600.0f * Fx::White)));
+	}
+
+	// Cyan / Rose Spaceship //////////////
 	auto cyanMaterial = new LambertianMaterial(Fx::Cyan);
 	auto roseMaterial = new LambertianMaterial(Fx::Rose);
+	//auto cyanMaterial = new DielectricMaterial(1.5f);
+	//auto roseMaterial = new DielectricMaterial(2.4f);
 	SfMesh* mesh = new SfMesh();
-	mesh->addTriangle({ -1.0f, 0.0f, 0.0f }, { 1.0f,  0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, cyanMaterial);
-	mesh->addTriangle({ -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, roseMaterial);
+
+	constexpr float scale = 0.125f;
+	constexpr Vector3f translate{ 0.0f, 0.0f, -0.5f };
+	Vector3f Vertexes[11]{
+		{  0.0f,  4.0f, 0.0f },
+		{ -2.0f, -1.0f, 0.0f },
+		{  0.0f, -2.0f, 0.0f },
+		{  2.0f, -1.0f, 0.0f },
+		{  0.0f,  0.0f, 1.0f },
+		{  3.0f,  0.0f, 0.0f },
+		{  4.0f, -1.0f, 0.0f },
+		{  3.0f, -4.0f, 0.0f },
+		{ -3.0f,  0.0f, 0.0f },
+		{ -4.0f, -1.0f, 0.0f },
+		{ -3.0f, -4.0f, 0.0f }
+	};
+	for (auto& v : Vertexes) {
+		v = scale * v + translate;
+	}
+	unsigned Indexes[10][3] = {
+		{ 0, 1,  2 },
+		{ 2, 3,  0 },
+		{ 0, 1,  4 },
+		{ 4, 3,  0 },
+		{ 2, 4,  1 },
+		{ 2, 3,  4 },
+		{ 6, 5,  3 },
+		{ 7, 6,  3 },
+		{ 1, 8,  9 },
+		{ 1, 9, 10 }
+	};
+
+	int i = 0;
+	for (auto indexes : Indexes) {
+		Material* material = (i++ % 2) == 0 ? roseMaterial : cyanMaterial;
+		mesh->addTriangle(Vertexes[indexes[0]],
+						  Vertexes[indexes[1]],
+						  Vertexes[indexes[2]],
+						  material);
+	}
+
+	//mesh->addTriangle({ -1.0f, 0.0f, 0.0f }, { 1.0f,  0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, cyanMaterial);
+	//mesh->addTriangle({ -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, roseMaterial);
 
 	pathTracerScene.world.RTOs.push_back(mesh);
 
