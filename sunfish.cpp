@@ -913,7 +913,9 @@ public:
 	virtual bool scatter(const Rayf& rayIn, const HitRecord& rec, Vector3f& attenuation, Rayf& scatteredRay) const;
 
 	Vector3f shadeClosestHit(const Rayf& r, const HitRecord& rec) override {
-		return albedo;
+		Vector3f V = r.direction.unit();
+		Vector3f N = rec.normal.unit();
+		return albedo;// *dot(V, N);
 	}
 
 	Vector3f albedo;
@@ -1184,6 +1186,9 @@ public:
 	float jitterRadius;
 	int rayDepth;
 
+	float exposure{ 0.0f };
+	float gamma{ 1.0f };
+
 	float sun_turbidity;
 	float sun_albedo[3];
 
@@ -1241,9 +1246,10 @@ string SunfishConfig::getParameters(int argc, const char** argv, int* i, const s
 
 
 SunfishConfig::SunfishConfig(int argc, const char** argv) {
-#ifndef NDEBUG
-	imageWidth = 1280 * 2;
-	imageHeight = 720 * 2;
+#ifndef _DEBUG
+	constexpr unsigned aspect = 24;
+	imageWidth = 2560;
+	imageHeight = 10 * imageWidth / aspect;
 #else
 	imageWidth = 480;
 	imageHeight = 200;
@@ -1259,14 +1265,15 @@ SunfishConfig::SunfishConfig(int argc, const char** argv) {
 	workgroupSizeX = 128;
 	workgroupSizeY = 128;
 	workgroupSizeZ = 128;
-	raysPerPixel = 16;
-#ifdef NDEBUG
-	samplesPerPixel = 100;
+#ifndef _DEBUG
+	raysPerPixel = 1000/10;
+	samplesPerPixel = 10;
 #else
-	samplesPerPixel = 5;
+	raysPerPixel = 1;
+	samplesPerPixel = 100;
 #endif
 	jitterRadius = 1.0f;
-	rayDepth = 16;
+	rayDepth = 6;
 
 	sun_turbidity = 1.0f;
 
@@ -1400,6 +1407,18 @@ SunfishConfig::SunfishConfig(int argc, const char** argv) {
 
 		if (getParameterf(argc, argv, &i, "-turbidity", &sun_turbidity)) {
 		}
+
+		if (strncmp(argv[i], "-exposure", strlen(argv[i])) == 0) {
+			if (i + 1 <= argc) {
+				exposure = atof(argv[i + 1]);
+			}
+		}
+
+		if (strncmp(argv[i], "-gamma", strlen(argv[i])) == 0) {
+			if (i + 1 <= argc) {
+				gamma = atof(argv[i + 1]);
+			}
+		}
 	}
 
 	if (argc == 1) {
@@ -1461,6 +1480,7 @@ struct WorkerContext {
 	int bottom{ 0 };
 	int right{ 0 };
 	int top{ 0 };
+	bool recursive{ false };
 	Scene* scene{ nullptr };
 	Image4f* framebuffer{ nullptr };
 	SunfishConfig* config{ nullptr };
@@ -1529,7 +1549,7 @@ Rayf sfRayGenShader(Scene* scene, float u, float v) {
 
 
 inline Vector3f sfRayMissShader(const Rayf& r, Scene* scene) {
-	constexpr int choice = 2;
+	constexpr int choice = 1;
 	switch (choice) {
 	case 0:
 		return sfShadeSkyPhysical(r, scene->ssg.environment);
@@ -1616,43 +1636,31 @@ int sfPathTraceWorker(WorkerContext* wc) {
 	// TODO: Should we create mini-textures and then draw these to an OpenGL window?
 	//Image4f tmpImage(wc->right - wc->left, wc->bottom - wc->top);
 
-	// TODO: Change this into a GTE class
-	// This is a predetermined jitter map for sampling around the ray
-	constexpr size_t MaxJitter = 1024;
-	static size_t jitterIndex = 0;
-	static float ujitter[MaxJitter]{};
-	static float vjitter[MaxJitter]{};
-	if (jitterIndex == 0) {
-		for (auto& u : ujitter) {
-			u = RTrandom.frand() * wc->config->jitterRadius;
-		}
-		for (auto& v : vjitter) {
-			v = RTrandom.frand() * wc->config->jitterRadius;
-		}
-	}
-
+	const bool recursive = wc->recursive;
 	// For every pixel
 	for (int i = wc->left; i <= wc->right; i++) {
 		for (int j = wc->top; j <= wc->bottom; j++) {
-			// TODO: change this so this can be an interable step
-
 			SunfishSample sample;
 			for (int s = 0; s < wc->config->raysPerPixel; s++) {
-				float u = float(i + ujitter[jitterIndex]) / (float)wc->config->imageWidth;
-				float v = float(j + vjitter[jitterIndex]) / (float)wc->config->imageHeight;
+				float ju = RTrandom.frand() * wc->config->jitterRadius;
+				float jv = RTrandom.frand() * wc->config->jitterRadius;
+				float u = float(i + ju) / (float)wc->config->imageWidth;
+				float v = float(j + jv) / (float)wc->config->imageHeight;
 
-				//sample.addSample(wc->scene->trace(sfRayGenShader(u, v, wc), 0));
-				//sample.addSample(sfTraceRecursive(wc->scene, sfRayGenShader(wc->scene, u, v)));
-				sample.addSample(sfTraceIterative(wc->scene, sfRayGenShader(wc->scene, u, v)));
-				jitterIndex++;
-				if (jitterIndex == MaxJitter) jitterIndex = 0;
+				if (recursive) {
+					sample.addSample(sfTraceRecursive(wc->scene, sfRayGenShader(wc->scene, u, v)));
+				}
+				else {
+					sample.addSample(sfTraceIterative(wc->scene, sfRayGenShader(wc->scene, u, v)));
+				}
 			}
 			sample.finalize();
 
 			// Framebuffer is write only, so mutex not really needed
 			// But if reading and writing was conditional, then mutex would be needed.
 			// lock_guard<mutex> guard(framebuffer_mutex);
-			wc->framebuffer->setPixel(i, j, (Color4f)sample.output);
+			Color4f prev = wc->framebuffer->getPixel(i, j);
+			wc->framebuffer->setPixel(i, j, (Color4f)sample.output + prev);
 		}
 	}
 	return 0;
@@ -1695,6 +1703,7 @@ private:
 	NormalShadeMaterial normalShader;
 	Scene pathTracerScene;
 	Image4f framebuffer;
+	float samples{ 0 };
 
 	// Asynchronous data
 	vector<WorkerContext> wcs;
@@ -1728,8 +1737,15 @@ void Sunfish::loadScene() {
 
 
 void Sunfish::_threadStart() {
+#ifdef _DEBUG
 	constexpr bool use_multithreading = false;
+#else
+	constexpr bool use_multithreading = true;
+#endif
 	if (use_multithreading) {
+		wcs.clear();
+		futures.clear();
+
 		for (int i = 0; i < config.imageWidth; i += config.workgroupSizeX) {
 			for (int j = 0; j < config.imageHeight; j += config.workgroupSizeY) {
 				WorkerContext wc;
@@ -1795,7 +1811,16 @@ void Sunfish::renderStart() {
 
 bool Sunfish::renderStep() {
 	_threadStart();
-	while (!_threadCheck());
+	while (!_threadCheck()) {
+		static size_t i = 0;
+		static char chars[] = "-\\|/";
+		fprintf(stdout, "%c", chars[i]);
+		fflush(stdout);
+		std::this_thread::yield();
+		std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
+		fprintf(stdout, "\b");
+		i = (i + 1) % 4;
+	}
 	std::cerr << "." << std::flush;
 	return true;
 }
@@ -1809,6 +1834,7 @@ void Sunfish::renderStop() {
 		i++;
 	}
 
+	std::cerr << "\n";
 	_gammaCorrectFramebuffer();
 
 	// Print out length of time
@@ -1839,20 +1865,6 @@ void Sunfish::renderStop() {
 
 
 void Sunfish::saveImage() {
-	//cout << "P3\n" << config.imageWidth << " " << config.imageHeight << "\n" << maxColor << "\n";
-
-	//for (int j = config.imageHeight - 1; j >= 0; j--) {
-	//	for (int i = 0; i < config.imageWidth; i++) {
-	//		Color4f finalColor = framebuffer.getPixel(i, j);
-	//		int ir = int(255.99f * finalColor.r);
-	//		int ig = int(255.99f * finalColor.g);
-	//		int ib = int(255.99f * finalColor.b);
-
-	//		cout << ir << " " << ig << " " << ib << "\n";
-	//	}
-	//	cout << flush;
-	//}
-
 	framebuffer.flipY();
 	framebuffer.saveEXR("output.exr");
 }
@@ -1906,29 +1918,33 @@ void Sunfish::_makeDefaultScene() {
 	// Front center, rose metal sphere ////
 	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, -0.5f, -0.5f), 0.25f, new MetalMaterial(Fx::Rose, 0.05f)));
 
+	// Left, Dielectric sphere ////////////
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.5f, -0.25f, -1.0f), 0.25f, new DielectricMaterial(1.5f)));
 	// Center, Blue lambertian sphere /////
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(0.0f, 0.0f, -1.0f), 0.5f, new LambertianMaterial(Fx::Blue)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, -0.25f, -1.0f), 0.25f, new LambertianMaterial(Fx::Blue)));
+
+	// Center, Yellow lambertian sphere /////
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, -0.25f, -1.0f), 0.25f, new LambertianMaterial(Fx::Yellow)));
 
 	// Right, Gold Sphere /////////////////
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.0f, 0.0f, -1.0f), 0.5f, new MetalMaterial(Fx::Gold, 0.0f)));
-
-	// Left, Dielectric sphere ////////////
-	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 0.0f, -1.0f), 0.25f, new DielectricMaterial(1.5f)));
+	pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(1.5f, -0.25f, -1.0f), 0.25f, new MetalMaterial(Fx::Gold, 0.0f)));
 
 	//pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { -0.8f, 0.0f, -1.0f }, new DielectricMaterial(2.4f)));
 
-	constexpr int includeLights = 0;
+	constexpr int includeLights = 1;
 	if (includeLights) {
 		// Top Left, Light Sphere /////////////
-		pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 1.0f, -2.0f), 0.10f, new LightMaterial(1600.0f * Fx::White)));
+		pathTracerScene.world.RTOs.push_back(new RtoSphere(Vector3f(-1.0f, 1.0f, 1.0f), 0.1250f, new LightMaterial(1600.0f * Fx::White)));
 
 		// Top Right, Light Box ///////////////
-		pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 1.0f, 1.0f, -2.0f }, new LightMaterial(1600.0f * Fx::White)));
+		pathTracerScene.world.RTOs.push_back(new RtoBox({ 0.125f, 0.125f, 0.125f }, { 1.0f, 1.0f, 1.0f }, new LightMaterial(1600.0f * Fx::White)));
 	}
 
 	// Cyan / Rose Spaceship //////////////
-	auto cyanMaterial = new LambertianMaterial(Fx::Cyan);
-	auto roseMaterial = new LambertianMaterial(Fx::Rose);
+	//auto cyanMaterial = new LambertianMaterial(Fx::Cyan);
+	//auto roseMaterial = new LambertianMaterial(Fx::Rose);
+	auto cyanMaterial = new MetalMaterial(Fx::Cyan, 1.5f);
+	auto roseMaterial = new MetalMaterial(Fx::Rose, 1.5f);
 	//auto cyanMaterial = new DielectricMaterial(1.5f);
 	//auto roseMaterial = new DielectricMaterial(2.4f);
 	SfMesh* mesh = new SfMesh();
@@ -1996,8 +2012,8 @@ void Sunfish::_makeDefaultScene() {
 
 
 void Sunfish::_gammaCorrectFramebuffer() {
-	float invSampleCount = 1.0f / (float)config.raysPerPixel * config.samplesPerPixel;
-	gammaCorrect(framebuffer, invSampleCount, 0.0f, 1.0f);
+	float invSampleCount = 1.0f / ((float)config.raysPerPixel * config.samplesPerPixel);
+	gammaCorrect(framebuffer, invSampleCount, config.exposure, config.gamma);
 }
 
 
