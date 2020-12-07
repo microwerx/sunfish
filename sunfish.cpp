@@ -63,7 +63,7 @@
 #pragma comment(lib, "starfish.lib")		// used for astronomy calculations
 #pragma comment(lib, "fluxions-gte.lib")	// used by all for math calculations
 #pragma comment(lib, "fluxions-base.lib")	// used for image loading and opengl drawing
-#pragma comment(lib, "fluxions.lib")		// used for simplescenegraph and rendering
+#pragma comment(lib, "fluxions-ssg.lib")		// used for simplescenegraph and rendering
 
 using namespace std;
 using namespace Fluxions;
